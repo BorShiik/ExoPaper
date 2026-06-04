@@ -52,6 +52,40 @@ services:
     volumes:
       - ravendb_data_c:/opt/RavenDB/Server/RavenData
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: exopaper_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: exopaper_ollama_init
+    depends_on:
+      - ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama to start..."
+        sleep 10
+        echo "Pulling nomic-embed-text..."
+        ollama pull nomic-embed-text
+        echo "Pulling llama3:8b..."
+        ollama pull llama3:8b
+        echo "All models pulled successfully!"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+
   exopaperrag.api:
     image: ${DOCKER_REGISTRY-}exopaperragapi
     container_name: exopaper_api
@@ -62,6 +96,7 @@ services:
       - ravendb-a
       - ravendb-b
       - ravendb-c
+      - ollama
     ports:
       - "5000:8080"      
     environment:
@@ -70,8 +105,12 @@ services:
       - RavenSettings__Urls__1=http://ravendb-b:8080
       - RavenSettings__Urls__2=http://ravendb-c:8080
       - RavenSettings__DatabaseName=ExoPaper
+      - OllamaSettings__BaseUrl=http://ollama:11434
+      - OllamaSettings__EmbeddingModel=nomic-embed-text
+      - OllamaSettings__GenerationModel=llama3:8b
 
 volumes:
   ravendb_data_a:
   ravendb_data_b:
   ravendb_data_c:
+  ollama_data:

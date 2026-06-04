@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using System;
+using MediatR;
+using ExoPaperRAG.Application.Features.Papers.Queries;
 
 namespace ExoPaperRAG.Api.Controllers
 {
@@ -17,10 +19,12 @@ namespace ExoPaperRAG.Api.Controllers
     public class PapersController : ControllerBase
     {
         private readonly IDocumentStore _store;
+        private readonly IMediator _mediator;
 
-        public PapersController(IDocumentStore store)
+        public PapersController(IDocumentStore store, IMediator mediator)
         {
             _store = store;
+            _mediator = mediator;
         }
 
         // CRUD: Create
@@ -98,6 +102,14 @@ namespace ExoPaperRAG.Api.Controllers
             operation.WaitForCompletion(TimeSpan.FromSeconds(15));
             
             return Ok(new { Message = "Mass update initiated via PatchByQuery" });
+        }
+
+        // Hybrid Search (Vector + Metadata Filter)
+        [HttpPost("hybrid-search")]
+        public async Task<IActionResult> HybridSearch([FromBody] SearchHybridQuery query, CancellationToken ct)
+        {
+            var results = await _mediator.Send(query, ct);
+            return Ok(results);
         }
     }
 }

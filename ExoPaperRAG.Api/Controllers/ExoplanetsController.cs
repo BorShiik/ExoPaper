@@ -6,6 +6,8 @@ using ExoPaperRAG.Infrastructure.Indexes;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
+using MediatR;
+using ExoPaperRAG.Application.Features.Planets.Queries;
 
 namespace ExoPaperRAG.Api.Controllers
 {
@@ -14,10 +16,12 @@ namespace ExoPaperRAG.Api.Controllers
     public class ExoplanetsController : ControllerBase
     {
         private readonly IDocumentStore _store;
+        private readonly IMediator _mediator;
 
-        public ExoplanetsController(IDocumentStore store)
+        public ExoplanetsController(IDocumentStore store, IMediator mediator)
         {
             _store = store;
+            _mediator = mediator;
         }
 
         // CRUD: Create
@@ -101,6 +105,15 @@ namespace ExoPaperRAG.Api.Controllers
             var results = await session.Query<Exoplanets_StatsByDiscoveryMethod.Result, Exoplanets_StatsByDiscoveryMethod>()
                 .ToListAsync();
 
+            return Ok(results);
+        }
+
+        // Uncertainty Tracking
+        [HttpGet("{id}/uncertainty")]
+        public async Task<IActionResult> GetUncertainty(string id, CancellationToken ct)
+        {
+            var docId = id.StartsWith("exoplanets/", StringComparison.OrdinalIgnoreCase) ? id : $"exoplanets/{id}";
+            var results = await _mediator.Send(new GetUncertaintySummaryQuery { ExoplanetId = docId }, ct);
             return Ok(results);
         }
     }

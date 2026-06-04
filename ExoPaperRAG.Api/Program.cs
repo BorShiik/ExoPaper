@@ -1,8 +1,10 @@
 
 using Polly;
 using Polly.Extensions.Http;
+using ExoPaperRAG.Application.Abstractions;
 using ExoPaperRAG.Infrastructure.Services;
 using ExoPaperRAG.Infrastructure.Settings;
+using ExoPaperRAG.Infrastructure.Workers;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Indexes;
 using Microsoft.Extensions.Options;
@@ -51,6 +53,18 @@ namespace ExoPaperRAG.Api
             // arXiv HTTP client with Polly resilience
             builder.Services.AddHttpClient<IArxivClient, ArxivClient>()
                 .AddPolicyHandler(GetRetryPolicy());
+
+            // ─── Ollama (AI / LLM) ──────────────────────────────────────
+            builder.Services.Configure<OllamaSettings>(builder.Configuration.GetSection(OllamaSettings.SectionName));
+            builder.Services.AddHttpClient<IOllamaClient, OllamaClient>()
+                .AddPolicyHandler(GetRetryPolicy());
+
+            // ─── EmbeddingWorker (RavenDB Data Subscription → Ollama) ───
+            builder.Services.AddHostedService<EmbeddingWorker>();
+
+            // ─── MediatR (CQRS) ─────────────────────────────────────────
+            builder.Services.AddMediatR(cfg =>
+                cfg.RegisterServicesFromAssembly(typeof(ExoPaperRAG.Application.Features.Papers.Queries.SearchHybridQuery).Assembly));
 
             // ─── Quartz.NET ───────────────────────────────────────────────
             builder.Services.AddQuartz(q =>
