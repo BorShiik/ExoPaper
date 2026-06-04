@@ -1,0 +1,77 @@
+
+
+services:
+  ravendb-a:
+    image: ravendb/ravendb:latest
+    container_name: exopaper_db_a
+    environment:
+      - RAVEN_Setup_Mode=None
+      - RAVEN_License_Eula_Accepted=true
+      - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
+      - RAVEN_ServerUrl=http://ravendb-a:8080
+      - RAVEN_ServerUrl_Tcp=tcp://ravendb-a:38888
+      - RAVEN_PublicServerUrl=http://localhost:8080
+      - RAVEN_PublicServerUrl_Tcp=tcp://localhost:38888
+    ports:
+      - "8080:8080"      
+      - "38888:38888"    
+    volumes:
+      - ravendb_data_a:/opt/RavenDB/Server/RavenData
+
+  ravendb-b:
+    image: ravendb/ravendb:latest
+    container_name: exopaper_db_b
+    environment:
+      - RAVEN_Setup_Mode=None
+      - RAVEN_License_Eula_Accepted=true
+      - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
+      - RAVEN_ServerUrl=http://ravendb-b:8080
+      - RAVEN_ServerUrl_Tcp=tcp://ravendb-b:38888
+      - RAVEN_PublicServerUrl=http://localhost:8081
+      - RAVEN_PublicServerUrl_Tcp=tcp://localhost:38889
+    ports:
+      - "8081:8080"      
+      - "38889:38888"    
+    volumes:
+      - ravendb_data_b:/opt/RavenDB/Server/RavenData
+
+  ravendb-c:
+    image: ravendb/ravendb:latest
+    container_name: exopaper_db_c
+    environment:
+      - RAVEN_Setup_Mode=None
+      - RAVEN_License_Eula_Accepted=true
+      - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
+      - RAVEN_ServerUrl=http://ravendb-c:8080
+      - RAVEN_ServerUrl_Tcp=tcp://ravendb-c:38888
+      - RAVEN_PublicServerUrl=http://localhost:8082
+      - RAVEN_PublicServerUrl_Tcp=tcp://localhost:38890
+    ports:
+      - "8082:8080"      
+      - "38890:38888"    
+    volumes:
+      - ravendb_data_c:/opt/RavenDB/Server/RavenData
+
+  exopaperrag.api:
+    image: ${DOCKER_REGISTRY-}exopaperragapi
+    container_name: exopaper_api
+    build:
+      context: .
+      dockerfile: ExoPaperRAG.Api/Dockerfile
+    depends_on:
+      - ravendb-a
+      - ravendb-b
+      - ravendb-c
+    ports:
+      - "5000:8080"      
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - RavenSettings__Urls__0=http://ravendb-a:8080
+      - RavenSettings__Urls__1=http://ravendb-b:8080
+      - RavenSettings__Urls__2=http://ravendb-c:8080
+      - RavenSettings__DatabaseName=ExoPaper
+
+volumes:
+  ravendb_data_a:
+  ravendb_data_b:
+  ravendb_data_c:
