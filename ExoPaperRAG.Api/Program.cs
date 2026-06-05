@@ -38,6 +38,7 @@ namespace ExoPaperRAG.Api
                     Urls = settings.Urls,
                     Database = settings.DatabaseName
                 };
+                store.Conventions.DisableTopologyUpdates = true;
                 store.Initialize();
 
                 IndexCreation.CreateIndexes(typeof(Exoplanets_ByHabitability).Assembly, store);
@@ -101,7 +102,10 @@ namespace ExoPaperRAG.Api
                 app.MapOpenApi();
             }
 
-            app.UseHttpsRedirection();
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
 
             app.UseAuthorization();
 
