@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -80,6 +81,59 @@ public class OllamaClient : IOllamaClient
         return result.Response;
     }
 
+    /// <inheritdoc />
+    public async IAsyncEnumerable<string> GenerateStreamAsync(
+        string prompt, string? systemPrompt = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var request = new GenerateRequest
+        {
+            Model = _settings.GenerationModel,
+            Prompt = prompt,
+            System = systemPrompt,
+            Stream = true
+        };
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/generate")
+        {
+            Content = JsonContent.Create(request, options: JsonOptions)
+        };
+
+        using var response = await _http.SendAsync(
+            httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+
+        while (!reader.EndOfStream)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var line = await reader.ReadLineAsync(ct);
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            GenerateResponse? chunk = null;
+            try
+            {
+                chunk = JsonSerializer.Deserialize<GenerateResponse>(line, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                // Ignore malformed/partial NDJSON lines.
+            }
+
+            if (chunk is null)
+                continue;
+
+            if (!string.IsNullOrEmpty(chunk.Response))
+                yield return chunk.Response;
+
+            if (chunk.Done)
+                yield break;
+        }
+    }
+
     // ── DTOs for Ollama REST API ──────────────────────────────────────
 
     private sealed class EmbeddingRequest
@@ -104,5 +158,6 @@ public class OllamaClient : IOllamaClient
     private sealed class GenerateResponse
     {
         public string Response { get; set; } = string.Empty;
+        public bool Done { get; set; }
     }
 }

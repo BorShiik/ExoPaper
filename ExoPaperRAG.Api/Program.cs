@@ -1,16 +1,19 @@
-
 using Polly;
 using Polly.Extensions.Http;
 using ExoPaperRAG.Application.Abstractions;
 using ExoPaperRAG.Infrastructure.Services;
 using ExoPaperRAG.Infrastructure.Settings;
 using ExoPaperRAG.Infrastructure.Workers;
+using ExoPaperRAG.Infrastructure.Persistence;
 using Raven.Client.Documents;
-using Raven.Client.Documents.Indexes;
 using Microsoft.Extensions.Options;
-using ExoPaperRAG.Infrastructure.Indexes;
 using ExoPaperRAG.Infrastructure.Jobs;
 using Quartz;
+using ExoPaperRAG.Domain.Rules;
+using ExoPaperRAG.Api.Hubs;
+using ExoPaperRAG.Api.Services;
+using ExoPaperRAG.Api.HealthChecks;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
 namespace ExoPaperRAG.Api
 {
@@ -20,16 +23,45 @@ namespace ExoPaperRAG.Api
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
-
             builder.Services.AddControllers();
-            // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();
 
-            builder.Services.Configure<NasaApiSettings>(builder.Configuration.GetSection(NasaApiSettings.SectionName));
-            builder.Services.Configure<ArxivSettings>(builder.Configuration.GetSection(ArxivSettings.SectionName));
-            
-            builder.Services.Configure<RavenSettings>(builder.Configuration.GetSection(RavenSettings.SectionName));
+            // RFC 7807 ProblemDetails for all error responses.
+            builder.Services.AddProblemDetails();
+
+            // ─── CORS ────────────────────────────────────────────────────
+            var corsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                              ?? new[] { "http://localhost:5173", "http://localhost:3000" };
+
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("DefaultCors", policy =>
+                {
+                    policy.WithOrigins(corsOrigins)
+                          .AllowAnyHeader()
+                          .AllowAnyMethod()
+                          .AllowCredentials(); // Required for SignalR WebSockets
+                });
+            });
+
+            // ─── Strongly-typed, validated configuration ──────────────────
+            builder.Services.AddOptions<NasaApiSettings>()
+                .Bind(builder.Configuration.GetSection(NasaApiSettings.SectionName))
+                .ValidateDataAnnotations().ValidateOnStart();
+
+            builder.Services.AddOptions<ArxivSettings>()
+                .Bind(builder.Configuration.GetSection(ArxivSettings.SectionName))
+                .ValidateDataAnnotations().ValidateOnStart();
+
+            builder.Services.AddOptions<RavenSettings>()
+                .Bind(builder.Configuration.GetSection(RavenSettings.SectionName))
+                .ValidateDataAnnotations().ValidateOnStart();
+
+            builder.Services.AddOptions<OllamaSettings>()
+                .Bind(builder.Configuration.GetSection(OllamaSettings.SectionName))
+                .ValidateDataAnnotations().ValidateOnStart();
+
+            // ─── RavenDB document store (connection only; init runs in a hosted service) ──
             builder.Services.AddSingleton<IDocumentStore>(sp =>
             {
                 var settings = sp.GetRequiredService<IOptions<RavenSettings>>().Value;
@@ -39,78 +71,95 @@ namespace ExoPaperRAG.Api
                     Database = settings.DatabaseName
                 };
                 store.Conventions.DisableTopologyUpdates = true;
-                store.Initialize();
-
-                IndexCreation.CreateIndexes(typeof(Exoplanets_ByHabitability).Assembly, store);
-
-                return store;
+                store.Conventions.MaxNumberOfRequestsPerSession = 100;
+                return store.Initialize();
             });
 
-            // NASA HTTP client with Polly resilience
+            // ─── External HTTP clients (Polly resilience) ─────────────────
             builder.Services.AddHttpClient<INasaClient, NasaClient>()
                 .AddPolicyHandler(GetRetryPolicy())
                 .AddPolicyHandler(GetCircuitBreakerPolicy());
 
-            // arXiv HTTP client with Polly resilience
             builder.Services.AddHttpClient<IArxivClient, ArxivClient>()
                 .AddPolicyHandler(GetRetryPolicy());
 
-            // ─── Ollama (AI / LLM) ──────────────────────────────────────
-            builder.Services.Configure<OllamaSettings>(builder.Configuration.GetSection(OllamaSettings.SectionName));
             builder.Services.AddHttpClient<IOllamaClient, OllamaClient>()
                 .AddPolicyHandler(GetRetryPolicy());
 
-            // ─── EmbeddingWorker (RavenDB Data Subscription → Ollama) ───
-            builder.Services.AddHostedService<EmbeddingWorker>();
+            // ─── Real-time (SignalR) ──────────────────────────────────────
+            builder.Services.AddSignalR();
+            builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>();
 
-            // ─── MediatR (CQRS) ─────────────────────────────────────────
+            // ─── Tagging rules ────────────────────────────────────────────
+            builder.Services.AddSingleton<IExoplanetTaggingRule, HwoCandidateRule>();
+
+            // ─── MediatR (CQRS) ───────────────────────────────────────────
             builder.Services.AddMediatR(cfg =>
-                cfg.RegisterServicesFromAssembly(typeof(ExoPaperRAG.Application.Features.Papers.Queries.SearchHybridQuery).Assembly));
+                cfg.RegisterServicesFromAssembly(
+                    typeof(ExoPaperRAG.Application.Features.Papers.Queries.SearchHybridQuery).Assembly));
 
-            // ─── Quartz.NET ───────────────────────────────────────────────
+            // ─── Entity-linking (paper ↔ exoplanet) ───────────────────────
+            builder.Services.AddSingleton<ExoplanetGazetteer>();
+
+            // ─── Hosted services — RavenInitializer MUST be first ─────────
+            builder.Services.AddHostedService<RavenInitializer>();
+            builder.Services.AddHostedService<EmbeddingWorker>();
+            builder.Services.AddHostedService<TaggingWorker>();
+            builder.Services.AddHostedService<PaperLinkingWorker>();
+            builder.Services.AddHostedService<OutboxDispatcher>();
+            builder.Services.AddHostedService<OutboxCleanupService>();
+
+            // ─── Health checks ────────────────────────────────────────────
+            builder.Services.AddHealthChecks()
+                .AddCheck<RavenHealthCheck>("ravendb", tags: new[] { "ready" })
+                .AddCheck<OllamaHealthCheck>("ollama", tags: new[] { "ready" });
+
+            // ─── Quartz.NET scheduled jobs ────────────────────────────────
             builder.Services.AddQuartz(q =>
             {
-                // NASA Sync Job — runs daily at 02:00 UTC
                 var nasaJobKey = new JobKey("NasaSyncJob");
                 q.AddJob<NasaSyncJob>(opts => opts.WithIdentity(nasaJobKey));
                 q.AddTrigger(opts => opts
                     .ForJob(nasaJobKey)
                     .WithIdentity("NasaSyncTrigger")
-                    .WithCronSchedule("0 0 2 * * ?") // Every day at 02:00
+                    .WithCronSchedule("0 0 2 * * ?")
                     .WithDescription("Daily NASA exoplanet sync"));
 
-                // arXiv Harvester Job — runs daily at 03:00 UTC
                 var arxivJobKey = new JobKey("ArxivHarvesterJob");
                 q.AddJob<ArxivHarvesterJob>(opts => opts.WithIdentity(arxivJobKey));
                 q.AddTrigger(opts => opts
                     .ForJob(arxivJobKey)
                     .WithIdentity("ArxivHarvesterTrigger")
-                    .WithCronSchedule("0 0 3 * * ?") // Every day at 03:00
+                    .WithCronSchedule("0 0 3 * * ?")
                     .WithDescription("Daily arXiv paper harvesting"));
             });
 
-            builder.Services.AddQuartzHostedService(opts =>
-            {
-                opts.WaitForJobsToComplete = true;
-            });
+            builder.Services.AddQuartzHostedService(opts => opts.WaitForJobsToComplete = true);
 
             var app = builder.Build();
 
-            // Configure the HTTP request pipeline.
+            // ─── HTTP pipeline ────────────────────────────────────────────
+            app.UseExceptionHandler();
+
             if (app.Environment.IsDevelopment())
             {
                 app.MapOpenApi();
             }
-
-            if (!app.Environment.IsDevelopment())
+            else
             {
                 app.UseHttpsRedirection();
             }
 
+            app.UseCors("DefaultCors");
             app.UseAuthorization();
 
-
             app.MapControllers();
+            app.MapHub<ExoPaperHub>("/hubs/exopaper");
+
+            // Liveness: process is up. Readiness: dependencies are reachable.
+            app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+            app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
+            app.MapHealthChecks("/health");
 
             app.Run();
 
@@ -118,28 +167,15 @@ namespace ExoPaperRAG.Api
             {
                 return HttpPolicyExtensions
                     .HandleTransientHttpError()
-                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-                    onRetry: (outcome, timespan, retryCount, context) =>
-                    {
-                        Console.WriteLine($"[WARNING] HTTP error. Retry: {retryCount}. Waiting: {timespan.TotalSeconds} s");
-                    });
+                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
             }
 
             static IAsyncPolicy<HttpResponseMessage> GetCircuitBreakerPolicy()
             {
                 return HttpPolicyExtensions
                     .HandleTransientHttpError()
-                    .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30), 
-                    onBreak: (outcome, timespan) =>
-                    {
-                        Console.WriteLine($"[CRITICAL] Circuit Broken! Waiting for {timespan.TotalSeconds} s before trying again.");
-                    },
-                    onReset: () => 
-                    {
-                        Console.WriteLine("[INFO] Circuit Reset. Normal operation resumed.");
-                    });
+                    .CircuitBreakerAsync(5, TimeSpan.FromSeconds(30));
             }
         }
     }
 }
-

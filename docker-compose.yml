@@ -8,10 +8,10 @@ services:
       - RAVEN_Setup_Mode=None
       - RAVEN_License_Eula_Accepted=true
       - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
-      - RAVEN_ServerUrl=http://ravendb-a:8080
-      - RAVEN_ServerUrl_Tcp=tcp://ravendb-a:38888
+      - RAVEN_ServerUrl=http://0.0.0.0:8080
+      - RAVEN_ServerUrl_Tcp=tcp://0.0.0.0:38888
       - RAVEN_PublicServerUrl=http://localhost:8080
-      - RAVEN_PublicServerUrl_Tcp=tcp://localhost:38888
+      - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-a:38888
     ports:
       - "8080:8080"      
       - "38888:38888"    
@@ -25,10 +25,10 @@ services:
       - RAVEN_Setup_Mode=None
       - RAVEN_License_Eula_Accepted=true
       - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
-      - RAVEN_ServerUrl=http://ravendb-b:8080
-      - RAVEN_ServerUrl_Tcp=tcp://ravendb-b:38888
+      - RAVEN_ServerUrl=http://0.0.0.0:8080
+      - RAVEN_ServerUrl_Tcp=tcp://0.0.0.0:38888
       - RAVEN_PublicServerUrl=http://localhost:8081
-      - RAVEN_PublicServerUrl_Tcp=tcp://localhost:38889
+      - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-b:38888
     ports:
       - "8081:8080"      
       - "38889:38888"    
@@ -42,10 +42,10 @@ services:
       - RAVEN_Setup_Mode=None
       - RAVEN_License_Eula_Accepted=true
       - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
-      - RAVEN_ServerUrl=http://ravendb-c:8080
-      - RAVEN_ServerUrl_Tcp=tcp://ravendb-c:38888
+      - RAVEN_ServerUrl=http://0.0.0.0:8080
+      - RAVEN_ServerUrl_Tcp=tcp://0.0.0.0:38888
       - RAVEN_PublicServerUrl=http://localhost:8082
-      - RAVEN_PublicServerUrl_Tcp=tcp://localhost:38890
+      - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-c:38888
     ports:
       - "8082:8080"      
       - "38890:38888"    
@@ -108,6 +108,17 @@ services:
       - OllamaSettings__BaseUrl=http://ollama:11434
       - OllamaSettings__EmbeddingModel=nomic-embed-text
       - OllamaSettings__GenerationModel=llama3:8b
+
+  exopaper-ui:
+    image: exopaper-ui:latest
+    container_name: exopaper_ui
+    build:
+      context: ./ExoPaper.UI
+      dockerfile: Dockerfile
+    depends_on:
+      - exopaperrag.api
+    ports:
+      - "3000:80"
 
 volumes:
   ravendb_data_a:

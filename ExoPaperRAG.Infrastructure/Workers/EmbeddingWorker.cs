@@ -2,27 +2,29 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Subscriptions;
+using Raven.Client.Exceptions.Documents.Subscriptions;
 using ExoPaperRAG.Domain.Entities;
 using ExoPaperRAG.Application.Abstractions;
+using System.Text.Json;
 
 namespace ExoPaperRAG.Infrastructure.Workers;
 
 /// <summary>
-/// Background service that uses RavenDB Data Subscriptions to continuously
-/// pick up papers without embeddings and vectorize them via Ollama.
-/// Uses ACK pattern — subscription is acknowledged only after successful vector save.
+/// Consumes a RavenDB Data Subscription of papers without embeddings, vectorizes
+/// each via Ollama, stores the vector and an Outbox event. RavenDB delivers each
+/// document until the batch is acknowledged, and the
+/// <see cref="SubscriptionOpeningStrategy.WaitForFree"/> strategy ensures only one
+/// consumer is active across all API instances (no duplicate work when scaled out).
 /// </summary>
-public class EmbeddingWorker : BackgroundService
+public sealed class EmbeddingWorker : BackgroundService
 {
     private readonly IDocumentStore _store;
     private readonly IOllamaClient _ollama;
     private readonly ILogger<EmbeddingWorker> _logger;
-    private const string SubscriptionName = "PapersWithoutEmbeddings";
 
-    public EmbeddingWorker(
-        IDocumentStore store,
-        IOllamaClient ollama,
-        ILogger<EmbeddingWorker> logger)
+    private const string SubscriptionName = "papers-without-embeddings";
+
+    public EmbeddingWorker(IDocumentStore store, IOllamaClient ollama, ILogger<EmbeddingWorker> logger)
     {
         _store = store;
         _ollama = ollama;
@@ -31,101 +33,85 @@ public class EmbeddingWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Ensure the subscription exists (idempotent — won't create a duplicate)
-        await EnsureSubscriptionExistsAsync();
-
-        _logger.LogInformation("[EmbeddingWorker] Starting RavenDB Data Subscription worker...");
+        await EnsureSubscriptionAsync(stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var options = new SubscriptionWorkerOptions(SubscriptionName)
+            {
+                Strategy = SubscriptionOpeningStrategy.WaitForFree,
+                MaxDocsPerBatch = 25
+            };
+
+            await using var worker = _store.Subscriptions.GetSubscriptionWorker<Paper>(options);
             try
             {
-                await ProcessSubscriptionAsync(stoppingToken);
+                _logger.LogInformation("[EmbeddingWorker] Subscription worker started.");
+                await worker.Run(ProcessBatchAsync, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("[EmbeddingWorker] Worker shutting down gracefully.");
                 break;
             }
             catch (Exception ex)
             {
-                // If Ollama crashes (OOM, etc.), wait and retry. 
-                // RavenDB won't ACK the batch, so nothing is lost.
-                _logger.LogError(ex, "[EmbeddingWorker] Subscription error. Retrying in 30s...");
-                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                _logger.LogError(ex, "[EmbeddingWorker] Subscription failed; restarting in 5s.");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
     }
 
-    private async Task EnsureSubscriptionExistsAsync()
+    private async Task ProcessBatchAsync(SubscriptionBatch<Paper> batch)
+    {
+        using var session = batch.OpenAsyncSession();
+
+        foreach (var item in batch.Items)
+        {
+            var paper = item.Result;
+            try
+            {
+                var textToEmbed = $"Title: {paper.Title}\nAbstract: {paper.Abstract}";
+                var embedding = await _ollama.GetEmbeddingAsync(textToEmbed);
+
+                if (embedding is { Length: > 0 })
+                {
+                    paper.SetEmbedding(embedding);
+
+                    var payload = JsonSerializer.Serialize(new { PaperId = paper.Id, paper.Title });
+                    await session.StoreAsync(new OutboxEvent
+                    {
+                        EventType = "PaperEmbedded",
+                        PayloadJson = payload
+                    });
+
+                    _logger.LogDebug("[EmbeddingWorker] Embedded paper '{Id}'.", paper.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Skip this document; it stays unembedded and is retried on a later pass.
+                _logger.LogError(ex, "[EmbeddingWorker] Failed to embed paper '{Id}'.", paper.Id);
+            }
+        }
+
+        await session.SaveChangesAsync();
+    }
+
+    private async Task EnsureSubscriptionAsync(CancellationToken ct)
     {
         try
         {
-            // Try to get existing subscription state — if it exists, do nothing
-            _store.Subscriptions.GetSubscriptionState(SubscriptionName);
-            _logger.LogInformation("[EmbeddingWorker] Subscription '{Name}' already exists.", SubscriptionName);
+            await _store.Subscriptions.GetSubscriptionStateAsync(SubscriptionName, token: ct);
         }
-        catch
+        catch (SubscriptionDoesNotExistException)
         {
-            // Subscription doesn't exist — create it with a filter for non-embedded papers
-            _store.Subscriptions.Create(new SubscriptionCreationOptions<Paper>
+            await _store.Subscriptions.CreateAsync(new SubscriptionCreationOptions<Paper>
             {
                 Name = SubscriptionName,
                 Filter = paper => paper.HasEmbeddings == false
-            });
+            }, token: ct);
 
             _logger.LogInformation("[EmbeddingWorker] Created subscription '{Name}'.", SubscriptionName);
         }
-    }
-
-    private async Task ProcessSubscriptionAsync(CancellationToken stoppingToken)
-    {
-        var worker = _store.Subscriptions.GetSubscriptionWorker<Paper>(
-            new SubscriptionWorkerOptions(SubscriptionName)
-            {
-                MaxDocsPerBatch = 50,
-                Strategy = SubscriptionOpeningStrategy.TakeOver
-            });
-
-        // This runs indefinitely until cancelled or an error occurs
-        await worker.Run(async batch =>
-        {
-            _logger.LogInformation("[EmbeddingWorker] Received batch of {Count} papers.", batch.Items.Count);
-
-            using var session = batch.OpenAsyncSession();
-
-            foreach (var item in batch.Items)
-            {
-                var paper = item.Result;
-
-                if (string.IsNullOrWhiteSpace(paper.Abstract))
-                {
-                    _logger.LogWarning("[EmbeddingWorker] Paper '{Id}' has no abstract, skipping.", paper.Id);
-                    paper.HasEmbeddings = true; // Mark as processed to avoid re-processing
-                    continue;
-                }
-
-                try
-                {
-                    // Call Ollama to generate embedding from the abstract text
-                    var vector = await _ollama.GetEmbeddingAsync(paper.Abstract, stoppingToken);
-
-                    paper.Vector = vector;
-                    paper.HasEmbeddings = true;
-
-                    _logger.LogDebug("[EmbeddingWorker] Vectorized paper '{Id}' ({Dim}D).", paper.Id, vector.Length);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[EmbeddingWorker] Failed to embed paper '{Id}'. Will retry in next batch.", paper.Id);
-                    throw; // Re-throw so the batch is NOT acknowledged
-                }
-            }
-
-            // ACK: Save all changes. If this succeeds, RavenDB marks the batch as processed.
-            await session.SaveChangesAsync(stoppingToken);
-            _logger.LogInformation("[EmbeddingWorker] Batch saved and acknowledged successfully.");
-
-        }, stoppingToken);
     }
 }

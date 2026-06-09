@@ -1,120 +1,74 @@
-using Microsoft.AspNetCore.Mvc;
-using Raven.Client.Documents;
-using Raven.Client.Documents.Linq;
-using ExoPaperRAG.Domain.Entities;
-using ExoPaperRAG.Infrastructure.Indexes;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using System.Linq;
-using MediatR;
+using ExoPaperRAG.Application.Features.Exoplanets.Commands;
+using ExoPaperRAG.Application.Features.Exoplanets.Queries;
 using ExoPaperRAG.Application.Features.Planets.Queries;
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
 
-namespace ExoPaperRAG.Api.Controllers
+namespace ExoPaperRAG.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class ExoplanetsController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class ExoplanetsController : ControllerBase
+    private readonly IMediator _mediator;
+
+    public ExoplanetsController(IMediator mediator) => _mediator = mediator;
+
+    /// <summary>Request body for the descriptive update endpoint.</summary>
+    public record UpdateExoplanetRequest(string Name, string? DiscoveryMethod, double? MassEarth);
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateExoplanetCommand command, CancellationToken ct)
     {
-        private readonly IDocumentStore _store;
-        private readonly IMediator _mediator;
+        var created = await _mediator.Send(command, ct);
+        var slug = created.Id.Split('/').Last();
+        return CreatedAtAction(nameof(GetById), new { id = slug }, created);
+    }
 
-        public ExoplanetsController(IDocumentStore store, IMediator mediator)
-        {
-            _store = store;
-            _mediator = mediator;
-        }
+    [HttpGet]
+    public async Task<IActionResult> Get(
+        [FromQuery] string? discoveryMethod,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 10,
+        [FromQuery] string? sortBy = null,
+        CancellationToken ct = default)
+        => Ok(await _mediator.Send(new GetExoplanetsQuery(discoveryMethod, skip, take, sortBy), ct));
 
-        // CRUD: Create
-        [HttpPost]
-        public async Task<IActionResult> Create([FromBody] Exoplanet planet)
-        {
-            using var session = _store.OpenAsyncSession();
-            await session.StoreAsync(planet);
-            await session.SaveChangesAsync();
-            return Ok(planet);
-        }
+    [HttpGet("habitable")]
+    public async Task<IActionResult> GetHabitable(
+        [FromQuery] int skip = 0, [FromQuery] int take = 10, CancellationToken ct = default)
+        => Ok(await _mediator.Send(new GetHabitableExoplanetsQuery(skip, take), ct));
 
-        // CRUD: Read & Dynamic Queries & Paging & Sorting
-        [HttpGet]
-        public async Task<IActionResult> Get([FromQuery] string? discoveryMethod, [FromQuery] int skip = 0, [FromQuery] int take = 10, [FromQuery] string? sortBy = null)
-        {
-            using var session = _store.OpenAsyncSession();
-            var query = session.Query<Exoplanet>();
+    [HttpGet("stats")]
+    public async Task<IActionResult> GetStats(CancellationToken ct)
+        => Ok(await _mediator.Send(new GetDiscoveryStatsQuery(), ct));
 
-            if (!string.IsNullOrEmpty(discoveryMethod))
-            {
-                // Dynamic query using Auto-Indexes
-                query = query.Where(p => p.DiscoveryMethod == discoveryMethod);
-            }
+    [HttpGet("by-id")]
+    public async Task<IActionResult> GetById([FromQuery] string id, CancellationToken ct)
+    {
+        var planet = await _mediator.Send(new GetExoplanetByIdQuery(id), ct);
+        return planet is null ? NotFound() : Ok(planet);
+    }
 
-            if (sortBy == "orbitalPeriod")
-            {
-                query = query.OrderBy(p => p.OrbitalPeriodDays);
-            }
+    [HttpPut("{**id}")]
+    public async Task<IActionResult> Update(string id, [FromBody] UpdateExoplanetRequest body, CancellationToken ct)
+    {
+        var updated = await _mediator.Send(
+            new UpdateExoplanetCommand(id, body.Name, body.DiscoveryMethod, body.MassEarth), ct);
+        return updated ? NoContent() : NotFound();
+    }
 
-            var results = await query.Skip(skip).Take(take).ToListAsync();
-            return Ok(results);
-        }
+    [HttpDelete("{**id}")]
+    public async Task<IActionResult> Delete(string id, CancellationToken ct)
+    {
+        await _mediator.Send(new DeleteExoplanetCommand(id), ct);
+        return NoContent();
+    }
 
-        // CRUD: Update
-        [HttpPut("{id}")]
-        public async Task<IActionResult> Update(string id, [FromBody] Exoplanet updatedPlanet)
-        {
-            using var session = _store.OpenAsyncSession();
-            var planet = await session.LoadAsync<Exoplanet>($"exoplanets/{id}");
-            if (planet == null) return NotFound();
-
-            planet.Name = updatedPlanet.Name;
-            planet.DiscoveryMethod = updatedPlanet.DiscoveryMethod;
-            planet.MassEarth = updatedPlanet.MassEarth;
-            
-            await session.SaveChangesAsync();
-            return NoContent();
-        }
-
-        // CRUD: Delete
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(string id)
-        {
-            using var session = _store.OpenAsyncSession();
-            session.Delete($"exoplanets/{id}");
-            await session.SaveChangesAsync();
-            return NoContent();
-        }
-
-        // Static Index Query with Computed Fields
-        [HttpGet("habitable")]
-        public async Task<IActionResult> GetHabitable([FromQuery] int skip = 0, [FromQuery] int take = 10)
-        {
-            using var session = _store.OpenAsyncSession();
-            var results = await session.Query<Exoplanets_ByHabitability.Result, Exoplanets_ByHabitability>()
-                .Where(x => x.IsPotentiallyHabitable)
-                .OfType<Exoplanet>()
-                .Skip(skip)
-                .Take(take)
-                .ToListAsync();
-
-            return Ok(results);
-        }
-
-        // Map-Reduce Index Query
-        [HttpGet("stats")]
-        public async Task<IActionResult> GetStats()
-        {
-            using var session = _store.OpenAsyncSession();
-            var results = await session.Query<Exoplanets_StatsByDiscoveryMethod.Result, Exoplanets_StatsByDiscoveryMethod>()
-                .ToListAsync();
-
-            return Ok(results);
-        }
-
-        // Uncertainty Tracking
-        [HttpGet("{id}/uncertainty")]
-        public async Task<IActionResult> GetUncertainty(string id, CancellationToken ct)
-        {
-            var docId = id.StartsWith("exoplanets/", StringComparison.OrdinalIgnoreCase) ? id : $"exoplanets/{id}";
-            var results = await _mediator.Send(new GetUncertaintySummaryQuery { ExoplanetId = docId }, ct);
-            return Ok(results);
-        }
+    [HttpGet("uncertainty")]
+    public async Task<IActionResult> GetUncertainty([FromQuery] string id, CancellationToken ct)
+    {
+        var docId = id.StartsWith("exoplanets/", StringComparison.OrdinalIgnoreCase) ? id : $"exoplanets/{id}";
+        return Ok(await _mediator.Send(new GetUncertaintySummaryQuery { ExoplanetId = docId }, ct));
     }
 }

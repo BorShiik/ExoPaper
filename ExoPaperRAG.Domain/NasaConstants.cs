@@ -20,6 +20,6 @@ namespace ExoPaperRAG.Domain
         public const string SemiMajorAxis = "pl_orbsmax";
         public const string StellarEffTemp = "st_teff";
         public const string Distance = "sy_dist";
-        public const string UpdateDate = "rowupdate";
+        public const string UpdateDate = "releasedate";
     }
 }

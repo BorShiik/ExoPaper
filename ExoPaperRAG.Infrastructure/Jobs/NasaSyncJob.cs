@@ -43,18 +43,19 @@ public class NasaSyncJob : IJob
             using var session = _store.OpenAsyncSession();
             var tracker = await session.LoadAsync<SyncTracker>($"SyncTrackers/{ProviderId}", ct);
 
-            if (tracker == null)
+            if (tracker == null || tracker.LastSyncUtc <= DateTime.MinValue)
             {
-                // First run ever — seed the full catalog
-                tracker = SyncTracker.CreateForProvider(ProviderId);
-                await session.StoreAsync(tracker, ct);
-                await session.SaveChangesAsync(ct);
+                if (tracker == null)
+                {
+                    tracker = SyncTracker.CreateForProvider(ProviderId);
+                    await session.StoreAsync(tracker, ct);
+                    await session.SaveChangesAsync(ct);
+                }
 
                 await SeedFullCatalogAsync(tracker, ct);
             }
             else
             {
-                // Incremental sync — only fetch updated records
                 await IncrementalSyncAsync(tracker, ct);
             }
 
@@ -73,45 +74,29 @@ public class NasaSyncJob : IJob
     private async Task SeedFullCatalogAsync(SyncTracker tracker, CancellationToken ct)
     {
         _logger.LogInformation("[NasaSync] Starting full catalog seeding...");
-        int offset = 0;
-        int totalUpserted = 0;
 
-        while (true)
+        var query = BuildSelectQuery().Build();
+
+        _logger.LogInformation("[NasaSync] Fetching all records without pagination.");
+
+        var dtos = await _nasaClient.FetchPlanetAcync(query, ct);
+
+        if (dtos.Count == 0)
         {
-            ct.ThrowIfCancellationRequested();
-
-            var query = BuildSelectQuery()
-                .Top(PageSize)
-                .Build();
-
-            // NASA TAP doesn't support OFFSET natively in all versions,
-            // but pscomppars supports it. We use a workaround: order by name and skip.
-            // For simplicity, we append OFFSET manually.
-            var pagedQuery = $"{query} OFFSET {offset}";
-
-            _logger.LogInformation("[NasaSync] Fetching page: OFFSET={Offset}, TOP={Top}", offset, PageSize);
-
-            var dtos = await _nasaClient.FetchPlanetAcync(pagedQuery, ct);
-
-            if (dtos.Count == 0)
-            {
-                _logger.LogInformation("[NasaSync] No more records. Seeding complete.");
-                break;
-            }
-
-            var upserted = await UpsertPlanetsAsync(dtos, ct);
-            totalUpserted += upserted;
-            offset += dtos.Count;
-
-            _logger.LogInformation("[NasaSync] Upserted {Count} planets (total so far: {Total})", upserted, totalUpserted);
+            _logger.LogInformation("[NasaSync] No records. Seeding complete.");
+            return;
         }
+
+        var upserted = await UpsertPlanetsAsync(dtos, ct);
+
+        _logger.LogInformation("[NasaSync] Upserted {Count} planets.", upserted);
 
         // Update tracker
         using var session = _store.OpenAsyncSession();
         var freshTracker = await session.LoadAsync<SyncTracker>($"SyncTrackers/{ProviderId}", ct);
         if (freshTracker != null)
         {
-            freshTracker.MarkSuccess(totalUpserted);
+            freshTracker.MarkSuccess(upserted);
             await session.SaveChangesAsync(ct);
         }
     }
@@ -121,75 +106,77 @@ public class NasaSyncJob : IJob
     /// </summary>
     private async Task IncrementalSyncAsync(SyncTracker tracker, CancellationToken ct)
     {
-        var sinceDate = tracker.LastSyncUtc.ToString("yyyy-MM-dd");
-        _logger.LogInformation("[NasaSync] Incremental sync since {Date}", sinceDate);
-
-        var query = BuildSelectQuery()
-            .Where(NasaColumns.UpdateDate, ">", sinceDate)
-            .Build();
-
-        var dtos = await _nasaClient.FetchPlanetAcync(query, ct);
-
-        if (dtos.Count == 0)
-        {
-            _logger.LogInformation("[NasaSync] No updated records found.");
-            // Still mark success to update the timestamp
-            using var session = _store.OpenAsyncSession();
-            var t = await session.LoadAsync<SyncTracker>($"SyncTrackers/{ProviderId}", ct);
-            t?.MarkSuccess(0);
-            await session.SaveChangesAsync(ct);
-            return;
-        }
-
-        var upserted = await UpsertPlanetsAsync(dtos, ct);
-        _logger.LogInformation("[NasaSync] Incremental sync: upserted {Count} planets.", upserted);
-
-        using var updateSession = _store.OpenAsyncSession();
-        var updatedTracker = await updateSession.LoadAsync<SyncTracker>($"SyncTrackers/{ProviderId}", ct);
-        if (updatedTracker != null)
-        {
-            updatedTracker.MarkSuccess(upserted);
-            await updateSession.SaveChangesAsync(ct);
-        }
+        _logger.LogInformation("[NasaSync] Incremental sync not supported for pscomppars. Running full sync.");
+        await SeedFullCatalogAsync(tracker, ct);
     }
 
     /// <summary>
     /// Upserts a batch of ExoplanetDto records into RavenDB.
-    /// Uses StoreAsync which acts as an upsert when the document ID matches.
+    /// Existing planets are loaded and only their scientific fields are updated,
+    /// so enrichment state (Tags, embeddings) survives every sync. New planets are created.
     /// </summary>
     private async Task<int> UpsertPlanetsAsync(List<ExoplanetDto> dtos, CancellationToken ct)
     {
         int count = 0;
-
-        // RavenDB sessions have a default max of 30 requests per session,
-        // so we batch in chunks of 25.
         const int batchSize = 25;
 
         for (int i = 0; i < dtos.Count; i += batchSize)
         {
             using var session = _store.OpenAsyncSession();
-            var batch = dtos.Skip(i).Take(batchSize);
+            var batch = dtos.Skip(i).Take(batchSize).ToList();
+
+            // Bulk-load existing documents in a single round-trip.
+            var ids = batch
+                .Where(d => !string.IsNullOrWhiteSpace(d.Name))
+                .Select(d => Exoplanet.BuildId(d.Name))
+                .Distinct()
+                .ToArray();
+
+            var existing = ids.Length > 0
+                ? await session.LoadAsync<Exoplanet>(ids, ct)
+                : new Dictionary<string, Exoplanet>();
 
             foreach (var dto in batch)
             {
                 if (string.IsNullOrWhiteSpace(dto.Name))
                     continue;
 
-                var planet = Exoplanet.Create(
-                    name: dto.Name,
-                    discoveryMethod: dto.DiscoveryMethod,
-                    massEarth: dto.MassEarth,
-                    lowerBoundMassEarth: dto.LowerBoundMassEarth,
-                    radiusEarth: dto.RadiusEarth,
-                    radiusJupiter: dto.RadiusJupiter,
-                    orbitalPeriodDays: dto.OrbitalPeriodDays,
-                    eccentricity: dto.Eccentricity,
-                    semiMajorAxisAu: dto.SemiMajorAxisAu,
-                    stellarEffectiveTemperatureK: dto.StellarEffectiveTemperatureK,
-                    distanceParsecs: dto.DistanceParsecs
-                );
+                var id = Exoplanet.BuildId(dto.Name);
 
-                await session.StoreAsync(planet, planet.Id, ct);
+                if (existing.TryGetValue(id, out var planet) && planet != null)
+                {
+                    // Update in place — preserves Tags / HasEmbeddings / TagsProcessed
+                    // unless a scientific field changed (then re-tagging is triggered).
+                    planet.ApplyScientificUpdate(
+                        dto.DiscoveryMethod,
+                        dto.MassEarth,
+                        dto.LowerBoundMassEarth,
+                        dto.RadiusEarth,
+                        dto.RadiusJupiter,
+                        dto.OrbitalPeriodDays,
+                        dto.Eccentricity,
+                        dto.SemiMajorAxisAu,
+                        dto.StellarEffectiveTemperatureK,
+                        dto.DistanceParsecs);
+                }
+                else
+                {
+                    var created = Exoplanet.Create(
+                        name: dto.Name,
+                        discoveryMethod: dto.DiscoveryMethod,
+                        massEarth: dto.MassEarth,
+                        lowerBoundMassEarth: dto.LowerBoundMassEarth,
+                        radiusEarth: dto.RadiusEarth,
+                        radiusJupiter: dto.RadiusJupiter,
+                        orbitalPeriodDays: dto.OrbitalPeriodDays,
+                        eccentricity: dto.Eccentricity,
+                        semiMajorAxisAu: dto.SemiMajorAxisAu,
+                        stellarEffectiveTemperatureK: dto.StellarEffectiveTemperatureK,
+                        distanceParsecs: dto.DistanceParsecs);
+
+                    await session.StoreAsync(created, created.Id, ct);
+                }
+
                 count++;
             }
 
@@ -213,8 +200,7 @@ public class NasaSyncJob : IJob
                 NasaColumns.OrbitalEccentricity,
                 NasaColumns.SemiMajorAxis,
                 NasaColumns.StellarEffTemp,
-                NasaColumns.Distance,
-                NasaColumns.UpdateDate
+                NasaColumns.Distance
             )
             .From(NasaTables.ConfirmedPlanets);
     }

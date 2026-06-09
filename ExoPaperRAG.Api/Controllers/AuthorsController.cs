@@ -1,60 +1,46 @@
+using ExoPaperRAG.Application.Features.Authors;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
-using Raven.Client.Documents;
-using ExoPaperRAG.Domain.Entities;
-using System.Threading.Tasks;
 
-namespace ExoPaperRAG.Api.Controllers
+namespace ExoPaperRAG.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class AuthorsController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class AuthorsController : ControllerBase
+    private readonly IMediator _mediator;
+
+    public AuthorsController(IMediator mediator) => _mediator = mediator;
+
+    public record CreateAuthorRequest(string Name, string Affiliation = "", string? Id = null);
+    public record UpdateAuthorRequest(string Name, string Affiliation = "");
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
-        private readonly IDocumentStore _store;
+        var author = await _mediator.Send(new GetAuthorByIdQuery(id), ct);
+        return author is null ? NotFound() : Ok(author);
+    }
 
-        public AuthorsController(IDocumentStore store)
-        {
-            _store = store;
-        }
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateAuthorRequest body, CancellationToken ct)
+    {
+        var created = await _mediator.Send(new CreateAuthorCommand(body.Name, body.Affiliation, body.Id), ct);
+        var slug = created.Id.Split('/').Last();
+        return CreatedAtAction(nameof(Get), new { id = slug }, created);
+    }
 
-        [HttpGet("{id}")]
-        public async Task<IActionResult> Get(string id)
-        {
-            using var session = _store.OpenAsyncSession();
-            var author = await session.LoadAsync<Author>($"authors/{id}");
-            if (author == null) return NotFound();
-            return Ok(author);
-        }
+    [HttpPut("{id}")]
+    public async Task<IActionResult> Update(string id, [FromBody] UpdateAuthorRequest body, CancellationToken ct)
+    {
+        var updated = await _mediator.Send(new UpdateAuthorCommand(id, body.Name, body.Affiliation), ct);
+        return updated ? NoContent() : NotFound();
+    }
 
-        [HttpPost]
-        public async Task<IActionResult> Create([FromBody] Author author)
-        {
-            using var session = _store.OpenAsyncSession();
-            await session.StoreAsync(author);
-            await session.SaveChangesAsync();
-            return CreatedAtAction(nameof(Get), new { id = author.Id?.Split('/')[1] }, author);
-        }
-
-        [HttpPut("{id}")]
-        public async Task<IActionResult> Update(string id, [FromBody] Author updatedAuthor)
-        {
-            using var session = _store.OpenAsyncSession();
-            var author = await session.LoadAsync<Author>($"authors/{id}");
-            if (author == null) return NotFound();
-
-            author.Name = updatedAuthor.Name;
-            author.Affiliation = updatedAuthor.Affiliation;
-
-            await session.SaveChangesAsync();
-            return NoContent();
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(string id)
-        {
-            using var session = _store.OpenAsyncSession();
-            session.Delete($"authors/{id}");
-            await session.SaveChangesAsync();
-            return NoContent();
-        }
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> Delete(string id, CancellationToken ct)
+    {
+        await _mediator.Send(new DeleteAuthorCommand(id), ct);
+        return NoContent();
     }
 }

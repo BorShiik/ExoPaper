@@ -126,6 +126,7 @@ public class ArxivHarvesterJob : IJob
         for (int i = 0; i < records.Count; i += BatchSize)
         {
             using var session = _store.OpenAsyncSession();
+            session.Advanced.MaxNumberOfRequestsPerSession = 1000;
             var batch = records.Skip(i).Take(BatchSize);
 
             foreach (var record in batch)

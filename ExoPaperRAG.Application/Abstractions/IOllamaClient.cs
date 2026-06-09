@@ -15,4 +15,10 @@ public interface IOllamaClient
     /// Generates a text completion using the configured generation model (llama3:8b).
     /// </summary>
     Task<string> GenerateAsync(string prompt, string? systemPrompt = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Streams a text completion token-by-token as it is produced by the model.
+    /// </summary>
+    IAsyncEnumerable<string> GenerateStreamAsync(
+        string prompt, string? systemPrompt = null, CancellationToken ct = default);
 }
