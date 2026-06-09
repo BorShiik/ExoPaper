@@ -15,12 +15,35 @@ interface Props {
 }
 
 const SURFACE_VERT = /* glsl */ `
+  uniform float uTime;
   varying vec3 vObjPos;
   varying vec3 vNormalW;
   varying vec3 vPositionW;
+
+  float hash(vec3 p){
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  
+  float noise(vec3 x){
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                   mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                   mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+
   void main() {
     vObjPos = position;
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    // Slower animation, slightly larger displacement to break the perfect sphere
+    vec3 noiseCoord = position * 2.0 + vec3(0.0, uTime * 0.4, 0.0);
+    float disp = noise(noiseCoord) * 0.12; 
+    
+    vec3 displaced = position + normal * disp;
+    vec4 worldPos = modelMatrix * vec4(displaced, 1.0);
     vPositionW = worldPos.xyz;
     vNormalW = normalize(mat3(modelMatrix) * normal);
     gl_Position = projectionMatrix * viewMatrix * worldPos;
@@ -37,9 +60,7 @@ const SURFACE_FRAG = /* glsl */ `
 
   vec3 kelvinToRGB(float kelvin) {
     float temp = clamp(kelvin, 1000.0, 40000.0) / 100.0;
-    float r = 0.0;
-    float g = 0.0;
-    float b = 0.0;
+    float r = 0.0, g = 0.0, b = 0.0;
 
     if (temp <= 66.0) {
         r = 1.0;
@@ -85,50 +106,88 @@ const SURFACE_FRAG = /* glsl */ `
   void main(){
     vec3 viewDir = normalize(cameraPosition - vPositionW);
     float ndv = clamp(dot(normalize(vNormalW), viewDir), 0.0, 1.0);
-    float limb = pow(ndv, 0.45); // limb darkening
+    float limb = pow(ndv, 0.7); // stronger limb darkening
 
-    // Domain warping for solar convection filaments
-    vec3 p1 = vObjPos * 3.5 + vec3(0.0, uTime * 0.05, 0.0);
+    // Slower convection filaments
+    vec3 p1 = vObjPos * 3.5 + vec3(0.0, uTime * 0.1, 0.0);
     float wX = fbm(p1 + vec3(11.3, 7.7, 3.1));
     float wY = fbm(p1 + vec3(5.2, 13.9, 8.4));
     float wZ = fbm(p1 + vec3(2.1, 4.3, 15.6));
     
-    vec3 warpedPos = p1 + vec3(wX, wY, wZ) * 0.8;
+    vec3 warpedPos = p1 + vec3(wX, wY, wZ) * 1.2;
     float plasma = fbm(warpedPos);
     
-    // Higher-frequency details
-    float detail = fbm(vObjPos * 12.0 - vec3(0.0, uTime * 0.12, 0.0));
-    float finalNoise = mix(plasma, detail, 0.3);
+    // Detailed granulation (slower)
+    float detail = fbm(vObjPos * 10.0 - vec3(0.0, uTime * 0.15, 0.0));
+    float finalNoise = mix(plasma, detail, 0.4);
 
-    // Sunspots (cool magnetic spots)
-    float spotsNoise = fbm(vObjPos * 2.5 + vec3(0.0, uTime * 0.015, 0.0));
-    float spot = smoothstep(0.35, 0.22, spotsNoise);
+    // Sunspots (cool magnetic spots), moving slowly
+    float spotsNoise = fbm(vObjPos * 2.0 + vec3(0.0, uTime * 0.05, 0.0));
+    float spot = smoothstep(0.45, 0.25, spotsNoise);
 
-    // Color mapping based on Stellar temperature
     vec3 baseColor = kelvinToRGB(uTemperature);
-    vec3 glowColor = kelvinToRGB(uTemperature + 1500.0) * 1.6;
+    vec3 glowColor = kelvinToRGB(uTemperature + 1500.0);
     
-    vec3 col = mix(baseColor * 0.3, glowColor, finalNoise);
+    // Specific custom color maps for a dramatic, realistic look
+    if (uTemperature > 9000.0) {
+        baseColor = vec3(0.0, 0.15, 0.8);
+        glowColor = vec3(0.3, 0.8, 1.0);
+    } else if (uTemperature >= 5000.0 && uTemperature <= 6800.0) {
+        // Deep fiery orange base, bright yellow-gold plasma cracks
+        baseColor = vec3(0.7, 0.15, 0.0);
+        glowColor = vec3(1.0, 0.7, 0.1);
+    } else if (uTemperature < 5000.0) {
+        baseColor = vec3(0.4, 0.01, 0.0);
+        glowColor = vec3(0.9, 0.25, 0.05);
+    }
     
-    // Add white-hot granulation peaks
-    vec3 hotGranulation = vec3(1.0, 0.9, 0.7) * pow(finalNoise, 3.0) * 1.5 * glowColor;
-    col += hotGranulation;
+    // High contrast plasma pattern
+    vec3 col = mix(baseColor, glowColor, pow(finalNoise, 1.5));
     
-    // Apply sunspots
-    col = mix(col, baseColor * 0.05, spot * 0.85);
+    // Add white-hot granulation peaks (clamped to avoid sudden HDR bloom flickering)
+    float clampedNoise = clamp(finalNoise, 0.0, 1.0);
+    vec3 hotGranulation = vec3(1.0, 0.9, 0.8) * pow(clampedNoise, 3.0) * glowColor;
+    col += hotGranulation * 0.6;
+    
+    // Apply sunspots deeply
+    col = mix(col, baseColor * 0.05, spot * 0.95);
     
     // Apply limb darkening (darker edges)
-    col *= (0.35 + 0.65 * limb);
+    col *= (0.1 + 0.9 * limb);
 
-    gl_FragColor = vec4(col * 2.6, 1.0);
+    // Boosted multiplier to 2.5 so the core HDR color aggressively breaks the bloom threshold
+    gl_FragColor = vec4(col * 2.5, 1.0);
   }
 `;
 
 const CORONA_VERT = /* glsl */ `
+  uniform float uTime;
   varying vec3 vNormalW;
   varying vec3 vPositionW;
+
+  float hash(vec3 p){
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  
+  float noise(vec3 x){
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                   mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                   mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+
   void main() {
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    // Warp the corona outline dynamically to match the boiling star body (slower)
+    vec3 noiseCoord = position * 2.0 + vec3(0.0, uTime * 0.3, 0.0);
+    float disp = noise(noiseCoord) * 0.15;
+    
+    vec3 displaced = position + normal * disp;
+    vec4 worldPos = modelMatrix * vec4(displaced, 1.0);
     vPositionW = worldPos.xyz;
     vNormalW = normalize(mat3(modelMatrix) * normal);
     gl_Position = projectionMatrix * viewMatrix * worldPos;
@@ -138,14 +197,13 @@ const CORONA_VERT = /* glsl */ `
 const CORONA_FRAG = /* glsl */ `
   uniform float uTemperature;
   uniform float uTime;
+  uniform float uFalloff;
   varying vec3 vNormalW;
   varying vec3 vPositionW;
 
   vec3 kelvinToRGB(float kelvin) {
     float temp = clamp(kelvin, 1000.0, 40000.0) / 100.0;
-    float r = 0.0;
-    float g = 0.0;
-    float b = 0.0;
+    float r = 0.0, g = 0.0, b = 0.0;
 
     if (temp <= 66.0) {
         r = 1.0;
@@ -168,11 +226,26 @@ const CORONA_FRAG = /* glsl */ `
 
   void main() {
     vec3 baseColor = kelvinToRGB(uTemperature);
+    if (uTemperature > 9000.0) {
+        baseColor = vec3(0.08, 0.4, 1.0);
+    } else if (uTemperature >= 5000.0 && uTemperature <= 6800.0) {
+        baseColor = vec3(1.0, 0.4, 0.05);
+    } else if (uTemperature < 5000.0) {
+        baseColor = vec3(0.9, 0.1, 0.02);
+    }
+
     vec3 viewDir = normalize(cameraPosition - vPositionW);
-    float NdotV = max(0.0, dot(normalize(vNormalW), viewDir));
-    // Rim glow fading to opacity 0 at outer boundary
-    float intensity = pow(1.0 - NdotV, 3.5) * 1.8;
-    gl_FragColor = vec4(baseColor * 1.8, intensity);
+    float NdotV = clamp(dot(normalize(vNormalW), viewDir), 0.0, 1.0);
+
+    // Smooth volumetric corona: brightest where the line of sight passes
+    // straight through the shell (over the disc) and dissolving completely to
+    // 0 at the silhouette, so the glow melts into pitch-black space with no
+    // hard "soap-bubble" rim. uFalloff controls how tightly it hugs the core.
+    float fres = pow(NdotV, uFalloff);
+    float pulse = 0.92 + 0.08 * sin(uTime * 0.6);
+    float intensity = fres * pulse;
+
+    gl_FragColor = vec4(baseColor * 2.2, intensity);
   }
 `;
 
@@ -189,6 +262,7 @@ const StarCoronaMaterial = shaderMaterial(
   {
     uTemperature: 5800.0,
     uTime: 0.0,
+    uFalloff: 3.0,
   },
   CORONA_VERT,
   CORONA_FRAG
@@ -214,6 +288,7 @@ export default function StarMesh({
   const lightRef = useRef<THREE.PointLight>(null!);
   const surfMatRef = useRef<any>(null);
   const coronaMatRef = useRef<any>(null);
+  const coronaMat2Ref = useRef<any>(null);
 
   const color = useMemo(() => kelvinToColor(temperature), [temperature]);
 
@@ -239,14 +314,19 @@ export default function StarMesh({
       coronaMatRef.current.uTime = t;
       coronaMatRef.current.uTemperature = tempVal;
     }
+    if (coronaMat2Ref.current) {
+      coronaMat2Ref.current.uTime = t * 0.7;
+      coronaMat2Ref.current.uTemperature = tempVal;
+    }
 
     if (coreRef.current) {
       coreRef.current.rotation.y += delta * 0.035;
-      coreRef.current.scale.setScalar(jitter ? 1 + Math.sin(t * 2.5) * 0.025 : 1);
+      // Much slower, majestic breathing pulsation instead of rapid jitter
+      coreRef.current.scale.setScalar(jitter ? 1.0 + Math.sin(t * 0.15) * 0.008 : 1.0);
     }
     if (lightRef.current) {
       lightRef.current.intensity = jitter
-        ? lightIntensity * (1 + Math.sin(t * 2.5) * 0.06)
+        ? lightIntensity * (1.0 + Math.sin(t * 0.7) * 0.03)
         : lightIntensity;
     }
   });
@@ -272,11 +352,26 @@ export default function StarMesh({
         />
       </mesh>
 
+      {/* Inner corona — tight, bright, hugs the photosphere. */}
       <mesh scale={1.25} geometry={coronaGeometry}>
         <starCoronaMaterial
           ref={coronaMatRef}
           uTemperature={temperature ?? 5800.0}
           uTime={0}
+          uFalloff={3.4}
+          transparent
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Outer corona — large, soft, low-falloff halo that fades into space. */}
+      <mesh scale={2.1} geometry={coronaGeometry}>
+        <starCoronaMaterial
+          ref={coronaMat2Ref}
+          uTemperature={temperature ?? 5800.0}
+          uTime={0}
+          uFalloff={1.7}
           transparent
           blending={THREE.AdditiveBlending}
           depthWrite={false}

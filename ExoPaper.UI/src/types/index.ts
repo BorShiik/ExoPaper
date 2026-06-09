@@ -19,6 +19,8 @@ export interface Exoplanet {
   hasEmbeddings: boolean;
   tags: string[];
   tagsProcessed: boolean;
+  /** True when a cached RAG uncertainty analysis already exists for this planet. */
+  hasCachedUncertainty?: boolean;
 }
 
 export interface Paper {

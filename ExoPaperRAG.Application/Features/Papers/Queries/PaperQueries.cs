@@ -51,13 +51,47 @@ public class GetPapersByExoplanetQueryHandler
         using var session = _store.OpenAsyncSession();
         var docId = RavenIds.EnsurePrefix(request.ExoplanetId, "exoplanets/");
 
-        var results = await session.Query<Paper>()
+        // 1. Hard links written by the PaperLinkingWorker (ExoplanetIds contains the doc id).
+        var linked = await session.Query<Paper>()
             .Where(x => x.ExoplanetIds.Contains(docId))
+            .OrderByDescending(x => x.PublishedDate)
             .Skip(request.Skip)
             .Take(Math.Clamp(request.Take, 1, 100))
             .ToListAsync(ct);
 
-        return results.Select(p => p.ToResponse()).ToList();
+        if (linked.Count > 0)
+            return linked.Select(p => p.ToResponse()).ToList();
+
+        // 2. Fallback: no explicit links yet → surface preprints that mention the
+        //    host star by name, so the literature panel is still useful.
+        var planet = await session.LoadAsync<Exoplanet>(docId, ct);
+        var term = BuildHostSearchTerm(planet?.Name);
+        if (string.IsNullOrWhiteSpace(term))
+            return Array.Empty<PaperResponse>();
+
+        var related = await session.Query<Paper, Papers_ByAbstractSearch>()
+            .Search(x => x.Abstract, term)
+            .OrderByDescending(x => x.PublishedDate)
+            .Take(Math.Clamp(request.Take, 1, 100))
+            .ToListAsync(ct);
+
+        return related.Select(p => p.ToResponse()).ToList();
+    }
+
+    /// <summary>
+    /// Derives a distinctive search term from a planet name by dropping the
+    /// trailing planet designation (e.g. "HN Peg b" → "HN Peg",
+    /// "MOA-2008-BLG-310L b" → "MOA-2008-BLG-310L"), so the fallback doesn't
+    /// match every abstract that merely contains the letter "b".
+    /// </summary>
+    private static string? BuildHostSearchTerm(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var trimmed = name.Trim();
+        var lastSpace = trimmed.LastIndexOf(' ');
+        if (lastSpace > 0 && trimmed.Length - lastSpace <= 3) // " b", " AB", " bc"
+            trimmed = trimmed[..lastSpace];
+        return trimmed.Trim();
     }
 }
 

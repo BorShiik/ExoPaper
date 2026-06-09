@@ -5,6 +5,7 @@ using ExoPaperRAG.Domain.Entities;
 using MediatR;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Linq;
+using Raven.Client.Documents.Session;
 
 namespace ExoPaperRAG.Application.Features.Rag;
 
@@ -61,19 +62,26 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
 
         using var session = _store.OpenAsyncSession();
 
-        var papers = await session.Advanced
-            .AsyncDocumentQuery<Paper>("Papers/ByVector")
-            .VectorSearch(
-                fieldName => fieldName.WithEmbedding(
-                    "Vector", Raven.Client.Documents.Indexes.Vector.VectorEmbeddingType.Single),
-                factory => factory.ByEmbedding(queryVector))
-            .Take(take)
-            .ToListAsync(cancellationToken);
-
+        // Resolve the focused planet first so retrieval can be grounded in it.
         Exoplanet? planet = null;
+        string? planetDocId = null;
         if (!string.IsNullOrWhiteSpace(request.ExoplanetId))
-            planet = await session.LoadAsync<Exoplanet>(
-                RavenIds.EnsurePrefix(request.ExoplanetId, "exoplanets/"), cancellationToken);
+        {
+            planetDocId = RavenIds.EnsurePrefix(request.ExoplanetId, "exoplanets/");
+            planet = await session.LoadAsync<Exoplanet>(planetDocId, cancellationToken);
+        }
+
+        // When a planet is in focus, scope the vector search to papers actually linked
+        // to it (Paper.ExoplanetIds). Otherwise a pure global similarity search returns
+        // the corpus-wide nearest neighbours to a generic question (e.g. "What is this
+        // planet?"), which are unrelated transit-survey papers — exactly the noise the
+        // "Related publications" panel avoids by filtering on the hard links.
+        var papers = await VectorSearchAsync(session, queryVector, planetDocId, take, cancellationToken);
+
+        // Fallback: the planet has no embedded+linked papers yet. Rather than answering
+        // from corpus-wide noise, retry unscoped only when no planet was in focus.
+        if (papers.Count == 0 && planetDocId is null)
+            papers = await VectorSearchAsync(session, queryVector, null, take, cancellationToken);
 
         // 1) Emit the sources used for grounding.
         yield return new AskChunk
@@ -87,8 +95,11 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
             yield return new AskChunk
             {
                 Type = "token",
-                Content = "No vectorized publications match this question yet. " +
-                          "Harvest more papers (arXiv) and let them embed, then try again."
+                Content = planetDocId is not null
+                    ? "No embedded publications are linked to this planet yet. Once the linking " +
+                      "and embedding workers have processed its papers, ask again."
+                    : "No vectorized publications match this question yet. " +
+                      "Harvest more papers (arXiv) and let them embed, then try again."
             };
             yield return new AskChunk { Type = "done" };
             yield break;
@@ -116,6 +127,32 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
             yield return new AskChunk { Type = "token", Content = token };
 
         yield return new AskChunk { Type = "done" };
+    }
+
+    /// <summary>
+    /// Vector similarity search over <c>Papers/ByVector</c>, optionally constrained to a
+    /// single planet via the indexed <see cref="Paper.ExoplanetIds"/> field.
+    /// </summary>
+    private static async Task<List<Paper>> VectorSearchAsync(
+        IAsyncDocumentSession session,
+        float[] queryVector,
+        string? planetDocId,
+        int take,
+        CancellationToken ct)
+    {
+        var query = session.Advanced.AsyncDocumentQuery<Paper>("Papers/ByVector");
+
+        // AND the planet filter with the vector search so only linked papers are ranked.
+        if (!string.IsNullOrWhiteSpace(planetDocId))
+            query = query.WhereEquals(nameof(Paper.ExoplanetIds), planetDocId);
+
+        return await query
+            .VectorSearch(
+                fieldName => fieldName.WithEmbedding(
+                    "Vector", Raven.Client.Documents.Indexes.Vector.VectorEmbeddingType.Single),
+                factory => factory.ByEmbedding(queryVector))
+            .Take(take)
+            .ToListAsync(ct);
     }
 
     private static string Truncate(string? text, int max)

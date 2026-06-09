@@ -1,5 +1,5 @@
 import { useAppStore } from "../../stores/appStore";
-import { Zap, Tag, Radio } from "lucide-react";
+import { Zap, Tag } from "lucide-react";
 import { useT } from "../../i18n/LanguageContext";
 import type { TranslationKey } from "../../i18n/translations";
 
@@ -42,20 +42,23 @@ export default function RecentEventsPanel() {
   const events = useAppStore((s) => s.events);
 
   return (
-    <div className="glass rounded-xl p-5 animate-fade-in-up">
-      <div className="flex items-center gap-2 mb-4">
-        <Radio className="h-4 w-4 text-accent-blue animate-pulse-glow" />
-        <h3 className="text-sm font-semibold text-text-primary">{t("feed.title")}</h3>
-        <span className="ml-auto text-[10px] font-mono text-text-muted uppercase tracking-wider">
-          {t("feed.realtime")}
-        </span>
-      </div>
-
-      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+    <div className="flex flex-col h-full animate-fade-in">
+      <div className="space-y-2 pr-1 h-full">
         {events.length === 0 && (
-          <p className="text-xs text-text-muted py-6 text-center">
-            {t("feed.waiting")}
-          </p>
+          <div className="font-mono text-[10px] sm:text-xs text-[#A3BE8C] opacity-80 leading-relaxed space-y-1.5 py-2">
+            <p className="animate-fade-in" style={{ animationDelay: "100ms", animationFillMode: "both" }}>
+              {">> [SYS] OutboxDispatcher listening to RavenDB Subscriptions..."}
+            </p>
+            <p className="animate-fade-in" style={{ animationDelay: "300ms", animationFillMode: "both" }}>
+              {">> [DB] Connected to cluster nodes: exopaper_db_a, b, c"}
+            </p>
+            <p className="animate-fade-in" style={{ animationDelay: "500ms", animationFillMode: "both" }}>
+              {">> [AI] Ollama server attached (models: llama3:8b, nomic-embed-text)"}
+            </p>
+            <p className="animate-pulse text-[#88C0D0] mt-4 font-bold" style={{ animationDelay: "700ms", animationFillMode: "both" }}>
+              {">> AWAITING TELEMETRY PAYLOAD..."}
+            </p>
+          </div>
         )}
 
         {events.map((evt) => {
@@ -63,7 +66,7 @@ export default function RecentEventsPanel() {
           return (
             <div
               key={evt.id}
-              className="flex items-start gap-2.5 rounded-lg px-3 py-2 bg-space-800/50 animate-slide-in-right"
+              className="flex items-start gap-2.5 rounded-lg px-3 py-2 bg-[#2E3440]/60 border border-[#434C5E]/30 animate-slide-in-right"
             >
               <div className="mt-0.5 shrink-0">
                 {eventIcons[cleanType] || (
@@ -71,10 +74,10 @@ export default function RecentEventsPanel() {
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs text-text-primary truncate">
+                <p className="text-xs text-[#ECEFF4] font-medium truncate">
                   {formatEventMessage(cleanType, evt.payload, t)}
                 </p>
-                <p className="text-[10px] text-text-muted mt-0.5">
+                <p className="text-[10px] text-text-muted mt-0.5 font-mono">
                   {evt.timestamp.toLocaleTimeString()}
                 </p>
               </div>

@@ -32,6 +32,13 @@ public class Exoplanet
     public List<string> Tags { get; set; } = new();
     public bool TagsProcessed { get; set; } = false;
 
+    /// <summary>
+    /// Cached RAG uncertainty analysis (serialized JSON of the summary result).
+    /// Populated on first analysis so we don't re-invoke the local LLM on every
+    /// request. Cleared/overwritten via the "regenerate" path.
+    /// </summary>
+    public string? CachedUncertaintySummary { get; set; }
+
     private Exoplanet() { } // For ORM / Deserialization
 
     public static Exoplanet Create(

@@ -23,16 +23,22 @@ public class HwoCandidateRule : IExoplanetTaggingRule
             sizeMatch = planet.MassEarth.Value <= 10.0;
         }
 
-        bool tempMatch = false;
+        bool tempMatch;
         if (planet.StellarEffectiveTemperatureK.HasValue)
         {
-            tempMatch = planet.StellarEffectiveTemperatureK.Value >= 2400 && 
+            // F, G, K, M host stars roughly span 2400–7500 K.
+            tempMatch = planet.StellarEffectiveTemperatureK.Value >= 2400 &&
                         planet.StellarEffectiveTemperatureK.Value <= 7500;
+        }
+        else if (planet.SemiMajorAxisAu.HasValue)
+        {
+            // No stellar temperature → fall back to a coarse orbital habitable-zone
+            // band so planets with unknown host temps can still qualify.
+            tempMatch = planet.SemiMajorAxisAu.Value >= 0.3 &&
+                        planet.SemiMajorAxisAu.Value <= 2.0;
         }
         else
         {
-            // If we don't know the star temp, we might not want to classify it, 
-            // but let's be optimistic or pessimistic. Let's say we need temp to be sure.
             tempMatch = false;
         }
 

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MediatR;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Linq;
@@ -37,6 +38,21 @@ public class GetUncertaintySummaryQueryHandler
                 ExoplanetId = request.ExoplanetId,
                 AnalysisSummary = "Exoplanet not found."
             };
+        }
+
+        // Step 1b: Cache hit — return the stored analysis without invoking the LLM.
+        if (!request.Regenerate && !string.IsNullOrEmpty(planet.CachedUncertaintySummary))
+        {
+            try
+            {
+                var cached = JsonSerializer.Deserialize<UncertaintySummaryResult>(planet.CachedUncertaintySummary);
+                if (cached is not null)
+                    return cached;
+            }
+            catch (JsonException)
+            {
+                // Corrupt cache → fall through and regenerate.
+            }
         }
 
         // Step 2: Find all papers that reference this exoplanet
@@ -91,13 +107,20 @@ public class GetUncertaintySummaryQueryHandler
         // Step 4: Generate analytical summary via LLM
         var summary = await _ollama.GenerateAsync(userPrompt, systemPrompt, ct);
 
-        return new UncertaintySummaryResult
+        var result = new UncertaintySummaryResult
         {
             ExoplanetId = request.ExoplanetId,
             ExoplanetName = planet.Name,
             AnalysisSummary = summary,
             Conflicts = conflicts
         };
+
+        // Step 5: Persist the analysis on the planet document so future requests
+        // are served from cache instead of re-invoking the local LLM.
+        planet.CachedUncertaintySummary = JsonSerializer.Serialize(result);
+        await session.SaveChangesAsync(ct);
+
+        return result;
     }
 
     private static string TruncateAbstract(string? text, int maxLength)

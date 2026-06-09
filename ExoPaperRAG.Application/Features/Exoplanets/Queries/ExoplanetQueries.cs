@@ -108,3 +108,20 @@ public class GetDiscoveryStatsQueryHandler
         }).ToList();
     }
 }
+
+// ── HWO candidate count (auto-tagged exoplanets) ────────────────────────────
+public record GetHwoCandidateCountQuery : IRequest<int>;
+
+public class GetHwoCandidateCountQueryHandler : IRequestHandler<GetHwoCandidateCountQuery, int>
+{
+    private readonly IDocumentStore _store;
+    public GetHwoCandidateCountQueryHandler(IDocumentStore store) => _store = store;
+
+    public async Task<int> Handle(GetHwoCandidateCountQuery request, CancellationToken ct)
+    {
+        using var session = _store.OpenAsyncSession();
+        return await session.Query<Exoplanet>()
+            .Where(p => p.Tags.Contains("HWO Candidate"))
+            .CountAsync(ct);
+    }
+}

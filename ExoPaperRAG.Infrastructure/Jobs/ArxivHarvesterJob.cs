@@ -57,12 +57,18 @@ public class ArxivHarvesterJob : IJob
                 tracker = SyncTracker.CreateForProvider(ProviderId);
                 await session.StoreAsync(tracker, ct);
                 await session.SaveChangesAsync(ct);
-                _logger.LogInformation("[ArxivHarvester] First run — harvesting without date filter.");
+                fromDate = DateTime.UtcNow.AddYears(-1);
+                _logger.LogInformation("[ArxivHarvester] First run — harvesting papers from the last 1 year.");
             }
             else if (tracker.LastSyncUtc > DateTime.MinValue)
             {
                 fromDate = tracker.LastSyncUtc.Date;
                 _logger.LogInformation("[ArxivHarvester] Incremental harvest from {Date}", fromDate.Value.ToString("yyyy-MM-dd"));
+            }
+            else
+            {
+                // If it was created but never succeeded, also use 1 year ago
+                fromDate = DateTime.UtcNow.AddYears(-1);
             }
 
             int totalRecords = 0;

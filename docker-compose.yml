@@ -10,13 +10,13 @@ services:
       - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
       - RAVEN_ServerUrl=http://0.0.0.0:8080
       - RAVEN_ServerUrl_Tcp=tcp://0.0.0.0:38888
-      - RAVEN_PublicServerUrl=http://localhost:8080
+      - RAVEN_PublicServerUrl=http://ravendb-a:8080
       - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-a:38888
     ports:
       - "8080:8080"      
       - "38888:38888"    
     volumes:
-      - ravendb_data_a:/opt/RavenDB/Server/RavenData
+      - ravendb_data_a:/var/lib/ravendb/data
 
   ravendb-b:
     image: ravendb/ravendb:latest
@@ -27,13 +27,13 @@ services:
       - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
       - RAVEN_ServerUrl=http://0.0.0.0:8080
       - RAVEN_ServerUrl_Tcp=tcp://0.0.0.0:38888
-      - RAVEN_PublicServerUrl=http://localhost:8081
+      - RAVEN_PublicServerUrl=http://ravendb-b:8080
       - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-b:38888
     ports:
       - "8081:8080"      
       - "38889:38888"    
     volumes:
-      - ravendb_data_b:/opt/RavenDB/Server/RavenData
+      - ravendb_data_b:/var/lib/ravendb/data
 
   ravendb-c:
     image: ravendb/ravendb:latest
@@ -44,13 +44,13 @@ services:
       - RAVEN_Security_UnsecuredAccessAllowed=PublicNetwork
       - RAVEN_ServerUrl=http://0.0.0.0:8080
       - RAVEN_ServerUrl_Tcp=tcp://0.0.0.0:38888
-      - RAVEN_PublicServerUrl=http://localhost:8082
+      - RAVEN_PublicServerUrl=http://ravendb-c:8080
       - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-c:38888
     ports:
       - "8082:8080"      
       - "38890:38888"    
     volumes:
-      - ravendb_data_c:/opt/RavenDB/Server/RavenData
+      - ravendb_data_c:/var/lib/ravendb/data
 
   ollama:
     image: ollama/ollama:latest
@@ -97,6 +97,7 @@ services:
       - ravendb-b
       - ravendb-c
       - ollama
+    restart: on-failure
     ports:
       - "5000:8080"      
     environment:

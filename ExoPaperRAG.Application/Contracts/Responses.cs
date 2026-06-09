@@ -24,6 +24,8 @@ public record ExoplanetResponse
     public double? DistanceParsecs { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     public bool HasEmbeddings { get; init; }
+    /// <summary>True if a cached uncertainty analysis already exists for this planet.</summary>
+    public bool HasCachedUncertainty { get; init; }
 }
 
 public record PaperResponse
@@ -85,7 +87,8 @@ public static class Mappings
         StellarEffectiveTemperatureK = e.StellarEffectiveTemperatureK,
         DistanceParsecs = e.DistanceParsecs,
         Tags = e.Tags,
-        HasEmbeddings = e.HasEmbeddings
+        HasEmbeddings = e.HasEmbeddings,
+        HasCachedUncertainty = !string.IsNullOrEmpty(e.CachedUncertaintySummary)
     };
 
     public static PaperResponse ToResponse(this Paper p) => new()

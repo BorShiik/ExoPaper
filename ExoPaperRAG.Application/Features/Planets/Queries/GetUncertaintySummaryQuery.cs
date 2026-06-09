@@ -11,6 +11,9 @@ public record GetUncertaintySummaryQuery : IRequest<UncertaintySummaryResult>
 {
     /// <summary>RavenDB document ID of the exoplanet (e.g. "exoplanets/Kepler-22b").</summary>
     public string ExoplanetId { get; init; } = string.Empty;
+
+    /// <summary>When true, bypasses the cached summary and re-runs the LLM pipeline.</summary>
+    public bool Regenerate { get; init; }
 }
 
 public record UncertaintySummaryResult

@@ -25,7 +25,7 @@ export default function Header({ title }: { title?: string }) {
   };
 
   return (
-    <header className="fixed top-4 left-20 right-4 lg:left-24 lg:right-8 z-20 flex h-14 items-center justify-between gap-2 rounded-2xl border border-[#434C5E] bg-[#2E3440]/30 backdrop-blur-md px-4 sm:px-6 shadow-lg pointer-events-auto transition-all">
+    <header className="w-fit mx-auto sticky top-4 z-50 flex items-center gap-6 px-6 py-2 rounded-full bg-[#2E3440]/70 backdrop-blur-xl border border-white/10 shadow-lg pointer-events-auto transition-all">
       <div className="flex min-w-0 items-center gap-2">
         <button
           onClick={toggleMobileNav}

@@ -1,14 +1,15 @@
-import { Suspense, useMemo } from "react";
-import { Canvas } from "@react-three/fiber";
+import React, { Suspense, useMemo, useRef } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Stars } from "@react-three/drei";
-import { EffectComposer, Bloom, Vignette, ToneMapping } from "@react-three/postprocessing";
+import { EffectComposer, Bloom, Vignette, ToneMapping, SMAA } from "@react-three/postprocessing";
 import { ToneMappingMode } from "postprocessing";
 import * as THREE from "three";
 import StarMesh from "./StarMesh";
 import PlanetMesh from "./PlanetMesh";
-import OrbitRing from "./OrbitRing";
 import CanvasErrorBoundary from "../common/CanvasErrorBoundary";
 import { hashStringToSeed } from "./stellar";
+
+const STAR_POS: [number, number, number] = [3.2, 1.2, -4];
 
 interface HeroPlanetConfig {
   radiusEarth: number;
@@ -20,49 +21,127 @@ interface HeroPlanetConfig {
   seed: number;
 }
 
+/**
+ * Cinematic Parallax Camera — Reads scroll directly from DOM to completely avoid
+ * React re-renders and GC pauses. Smoothly lerps between 3 keyframes.
+ */
+function ParallaxCamera() {
+  const { camera } = useThree();
+  
+  // Pre-allocate vectors to avoid GC in the useFrame loop
+  const targetPos = useRef(new THREE.Vector3());
+  const targetLook = useRef(new THREE.Vector3());
+  const currentLook = useRef(new THREE.Vector3(3.2, 1.2, -2));
+  
+  // Drift base vectors
+  const basePos = useRef(new THREE.Vector3());
+  
+  useFrame((state) => {
+    const scrollEl = document.getElementById("main-scroll-container");
+    let progress = 0;
+    
+    if (scrollEl) {
+      const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
+      if (maxScroll > 0) {
+        progress = Math.min(Math.max(scrollEl.scrollTop / maxScroll, 0), 1);
+      }
+    }
+
+    // Keyframes
+    // 0.0 -> Hero
+    // 0.5 -> Metrics
+    // 1.0 -> Analytics
+    if (progress < 0.5) {
+      const p = progress / 0.5;
+      basePos.current.lerpVectors(
+        new THREE.Vector3(0, 2.5, 14),
+        new THREE.Vector3(0, -1, 10),
+        p
+      );
+      targetLook.current.lerpVectors(
+        new THREE.Vector3(3.2, 1.2, -2),
+        new THREE.Vector3(3.2, 4, -2),
+        p
+      );
+    } else {
+      const p = (progress - 0.5) / 0.5;
+      basePos.current.lerpVectors(
+        new THREE.Vector3(0, -1, 10),
+        new THREE.Vector3(3, 0.5, 4),
+        p
+      );
+      targetLook.current.lerpVectors(
+        new THREE.Vector3(3.2, 4, -2),
+        new THREE.Vector3(5, 0, -5),
+        p
+      );
+    }
+
+    // Apply subtle breathing drift ON TOP of the parallax position
+    const t = state.clock.elapsedTime;
+    targetPos.current.x = basePos.current.x + Math.sin(t * 0.08) * 0.9;
+    targetPos.current.y = basePos.current.y + Math.sin(t * 0.11) * 0.45;
+    targetPos.current.z = basePos.current.z + Math.cos(t * 0.06) * 0.6;
+
+    // Smoothly ease the camera to the target position
+    camera.position.lerp(targetPos.current, 0.05);
+    
+    // Smoothly ease the lookAt target
+    currentLook.current.lerp(targetLook.current, 0.05);
+    camera.lookAt(currentLook.current);
+  });
+  return null;
+}
+
 function Scene() {
   const planets = useMemo<HeroPlanetConfig[]>(() => {
     const specs = [
-      { radiusEarth: 1.0, orbitRadius: 3.8, orbitalPeriod: 40, isHwoCandidate: true },
-      { radiusEarth: 3.4, orbitRadius: 5.6, orbitalPeriod: 95, isHwoCandidate: false },
-      { radiusEarth: 0.8, orbitRadius: 7.4, orbitalPeriod: 165, isHwoCandidate: false },
-      { radiusEarth: 5.2, orbitRadius: 9.4, orbitalPeriod: 260, isHwoCandidate: false },
+      { radiusEarth: 1.0, orbitRadius: 5.8, orbitalPeriod: 40, isHwoCandidate: true },
+      { radiusEarth: 3.4, orbitRadius: 8.2, orbitalPeriod: 95, isHwoCandidate: false },
+      { radiusEarth: 0.8, orbitRadius: 10.6, orbitalPeriod: 165, isHwoCandidate: false },
+      { radiusEarth: 5.2, orbitRadius: 13.4, orbitalPeriod: 260, isHwoCandidate: false },
     ];
     return specs.map((s, i) => ({
       ...s,
       phase: (i / specs.length) * Math.PI * 2,
-      inclination: 0.4 + i * 0.25,
+      inclination: 0.1 + i * 0.05,
       seed: hashStringToSeed(`hero-planet-${i}`),
     }));
   }, []);
 
   return (
     <>
-      <ambientLight intensity={0.03} />
-      <Stars radius={140} depth={70} count={5000} factor={4.5} saturation={0} fade speed={0.35} />
+      <ParallaxCamera />
+      <ambientLight intensity={0.14} />
+      {/* Cool blue fill light to make the night sides of the planets visible */}
+      <directionalLight position={[-8, 6, 12]} intensity={0.8} color="#88C0D0" />
+
+      {/* Two depth layers of stars give real parallax as the camera drifts. */}
+      <Stars radius={140} depth={70} count={4200} factor={4.5} saturation={0} fade speed={0.3} />
+      <Stars radius={70} depth={40} count={1400} factor={3} saturation={0} fade speed={0.5} />
 
       {/* Sun-like central star lighting the whole system */}
-      <StarMesh temperature={5800} jitter={false} radius={1.5} lightIntensity={120} position={[8, 4, -5]} />
+      <StarMesh temperature={5800} jitter radius={1.5} lightIntensity={600} position={STAR_POS} />
 
       {planets.map((p) => (
-        <group key={p.seed}>
-          <OrbitRing radius={p.orbitRadius} position={[8, 4, -5]} />
-          <PlanetMesh
-            radiusEarth={p.radiusEarth}
-            seed={p.seed}
-            orbitRadius={p.orbitRadius}
-            orbitalPeriod={p.orbitalPeriod}
-            isHwoCandidate={p.isHwoCandidate}
-            phase={p.phase}
-            inclination={p.inclination}
-            starPosition={[8, 4, -5]}
-          />
-        </group>
+        <PlanetMesh
+          key={p.seed}
+          radiusEarth={p.radiusEarth}
+          seed={p.seed}
+          orbitRadius={p.orbitRadius}
+          orbitalPeriod={p.orbitalPeriod}
+          isHwoCandidate={p.isHwoCandidate}
+          phase={p.phase}
+          inclination={p.inclination}
+          starPosition={STAR_POS}
+          position={STAR_POS}
+        />
       ))}
 
-      <EffectComposer multisampling={4}>
-        <Bloom luminanceThreshold={1.0} intensity={0.7} mipmapBlur radius={0.75} />
-        <Vignette eskil={false} offset={0.2} darkness={0.9} />
+      <EffectComposer multisampling={0}>
+        <SMAA />
+        <Bloom luminanceThreshold={0.85} intensity={1.0} mipmapBlur radius={0.85} />
+        <Vignette eskil={false} offset={0.2} darkness={0.92} />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
       </EffectComposer>
     </>
@@ -73,7 +152,7 @@ function Scene() {
  * Full-bleed animated cosmos for the dashboard hero. Non-interactive
  * (pointer-events handled by the parent) so overlay UI stays usable.
  */
-export default function CosmicHero() {
+const CosmicHero = React.memo(function CosmicHero() {
   return (
     <div className="absolute inset-0" aria-hidden="true">
       <CanvasErrorBoundary>
@@ -85,7 +164,7 @@ export default function CosmicHero() {
             powerPreference: "high-performance",
             toneMapping: THREE.NoToneMapping,
           }}
-          dpr={[1, 1.5]}
+          dpr={[1, 1.75]}
           style={{ background: "transparent" }}
         >
           <Suspense fallback={null}>
@@ -95,4 +174,6 @@ export default function CosmicHero() {
       </CanvasErrorBoundary>
     </div>
   );
-}
+});
+
+export default CosmicHero;

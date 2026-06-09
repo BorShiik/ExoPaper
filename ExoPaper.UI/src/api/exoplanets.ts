@@ -28,11 +28,17 @@ export async function getDiscoveryStats(): Promise<DiscoveryStats[]> {
   return data;
 }
 
+export async function getHwoCandidateCount(): Promise<number> {
+  const { data } = await api.get<{ count: number }>("/exoplanets/hwo-count");
+  return data.count;
+}
+
 export async function getUncertaintySummary(
-  id: string
+  id: string,
+  regenerate = false
 ): Promise<UncertaintySummary> {
   const { data } = await api.get<UncertaintySummary>("/exoplanets/uncertainty", {
-    params: { id },
+    params: { id, regenerate },
   });
   return data;
 }

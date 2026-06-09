@@ -1,11 +1,31 @@
 import { useEffect, useState } from "react";
-import { FileText, Calendar, BookOpen, User } from "lucide-react";
+import { motion } from "framer-motion";
+import { FileText, Calendar, BookOpen, User, ExternalLink } from "lucide-react";
 import { getPapersByExoplanet } from "../../api/papers";
 import type { Paper } from "../../types";
 import { useT } from "../../i18n/LanguageContext";
 
 interface Props {
   planetId: string;
+}
+
+/** arXiv preprints use the tail of the document id without the collection prefix. */
+function extractArxivId(paperId: string): string {
+  return paperId.replace(/^papers\//i, "");
+}
+
+/**
+ * Builds a valid arXiv abstract URL. Old-scheme ids (7 plain digits like
+ * "0506011") lost their archive class during OAI harvest — our harvest set is
+ * astro-ph, so we reconstruct the canonical "astro-ph/NNNNNNN" form. New-scheme
+ * ids ("0704.0001") and ids that already carry an archive ("astro-ph/0506011")
+ * are used as-is.
+ */
+function arxivUrl(paperId: string): string {
+  const raw = extractArxivId(paperId);
+  if (raw.includes("/") || raw.includes(".")) return `https://arxiv.org/abs/${raw}`;
+  if (/^\d{7}$/.test(raw)) return `https://arxiv.org/abs/astro-ph/${raw}`;
+  return `https://arxiv.org/abs/${raw}`;
 }
 
 export default function LinkedPapers({ planetId }: Props) {
@@ -21,18 +41,12 @@ export default function LinkedPapers({ planetId }: Props) {
       setError(null);
       try {
         const results = await getPapersByExoplanet(planetId);
-        if (active) {
-          setPapers(results);
-        }
+        if (active) setPapers(results);
       } catch (e) {
         console.error(e);
-        if (active) {
-          setError(t("linked.error"));
-        }
+        if (active) setError(t("linked.error"));
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
 
@@ -40,55 +54,68 @@ export default function LinkedPapers({ planetId }: Props) {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planetId]);
 
   return (
-    <div className="glass rounded-xl p-5 animate-fade-in-up">
-      <div className="flex items-center gap-2 mb-4">
-        <BookOpen className="h-4 w-4 text-accent-blue" />
-        <h3 className="text-sm font-semibold text-text-primary">
+    <div className="rounded-2xl border border-white/10 bg-[#2E3440]/30 backdrop-blur-xl p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <BookOpen className="h-4 w-4 text-[#88C0D0]" />
+        <h3 className="text-sm font-semibold text-[#ECEFF4] drop-shadow-[0_2px_8px_rgba(0,0,0,1)]">
           {t("linked.title")}
         </h3>
+        {!loading && papers.length > 0 && (
+          <span className="ml-auto rounded-full bg-[#81A1C1]/15 px-2 py-0.5 font-mono text-[10px] text-[#81A1C1]">
+            {papers.length}
+          </span>
+        )}
       </div>
 
       {loading && (
         <div className="space-y-3">
-          {[1, 2].map((i) => (
-            <div key={i} className="animate-pulse space-y-2 rounded-lg bg-space-850 p-4">
-              <div className="h-4 bg-space-700 rounded w-2/3"></div>
-              <div className="h-3 bg-space-700 rounded w-1/4"></div>
-              <div className="h-3 bg-space-700 rounded w-full"></div>
+          {[0, 1].map((i) => (
+            <div key={i} className="rounded-xl border border-white/[0.06] bg-[#0d1322]/50 p-4">
+              <div className="h-3.5 w-2/3 rounded animate-shimmer-aurora" />
+              <div className="mt-2 h-2.5 w-1/4 rounded animate-shimmer-aurora" />
+              <div className="mt-3 h-2.5 w-full rounded animate-shimmer-aurora" />
             </div>
           ))}
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg bg-accent-red/10 border border-accent-red/20 px-4 py-3 text-xs text-accent-red">
+        <div className="rounded-xl border border-[#BF616A]/30 bg-[#BF616A]/10 px-4 py-3 text-xs text-[#d98b92]">
           {error}
         </div>
       )}
 
       {!loading && !error && papers.length === 0 && (
-        <p className="text-xs text-text-muted py-4 text-center">
-          {t("linked.empty")}
-        </p>
+        <div className="rounded-xl border border-dashed border-white/10 py-8 text-center">
+          <FileText className="mx-auto mb-2 h-7 w-7 text-[#4c566a]" />
+          <p className="text-xs text-[#9aa7bd]">{t("linked.empty")}</p>
+        </div>
       )}
 
       {!loading && !error && papers.length > 0 && (
-        <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1 custom-scrollbar">
-          {papers.map((paper) => (
-            <div
+        <div className="custom-scrollbar max-h-[460px] space-y-3 overflow-y-auto pr-1">
+          {papers.map((paper, i) => (
+            <motion.a
               key={paper.id}
-              className="rounded-lg bg-space-800/40 p-4 border border-space-700/35 hover:border-accent-blue/30 hover:bg-space-800/60 transition-all group"
+              href={arxivUrl(paper.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: Math.min(i * 0.06, 0.5), ease: [0.16, 1, 0.3, 1] }}
+              className="group block rounded-xl border border-white/[0.07] bg-[#0d1322]/50 p-4 transition-all hover:border-[#88C0D0]/40 hover:bg-[#0d1322]/75"
             >
               <div className="flex items-start gap-3">
-                <FileText className="h-4 w-4 text-text-muted group-hover:text-accent-blue transition-colors mt-0.5 shrink-0" />
-                <div className="space-y-1">
-                  <h4 className="text-xs font-semibold text-text-primary group-hover:text-accent-blue transition-colors line-clamp-2 leading-snug">
+                <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[#7a869c] transition-colors group-hover:text-[#88C0D0]" />
+                <div className="min-w-0 space-y-1.5">
+                  <h4 className="line-clamp-2 text-xs font-semibold leading-snug text-[#ECEFF4] transition-colors group-hover:text-white">
                     {paper.title}
                   </h4>
-                  <div className="flex items-center gap-3 text-[10px] text-text-muted">
+                  <div className="flex flex-wrap items-center gap-3 text-[10px] text-[#7a869c]">
                     <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
                       {new Date(paper.publishedDate).toLocaleDateString()}
@@ -98,17 +125,21 @@ export default function LinkedPapers({ planetId }: Props) {
                       {t("papers.authors", { count: paper.authorIds.length })}
                     </span>
                     {paper.isReviewed && (
-                      <span className="rounded bg-accent-blue/10 border border-accent-blue/20 px-1 py-0.5 text-[8px] font-medium text-accent-blue uppercase">
+                      <span className="rounded border border-[#81A1C1]/25 bg-[#81A1C1]/10 px-1.5 py-0.5 text-[8px] font-medium uppercase text-[#81A1C1]">
                         {t("papers.reviewed")}
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-text-secondary mt-2 line-clamp-3 leading-relaxed whitespace-pre-line">
+                  <p className="line-clamp-3 whitespace-pre-line text-[11px] leading-relaxed text-[#9aa7bd]">
                     {paper.abstract}
                   </p>
+                  <span className="inline-flex items-center gap-1 pt-0.5 font-mono text-[10px] text-[#88C0D0] opacity-0 transition-opacity group-hover:opacity-100">
+                    arXiv:{extractArxivId(paper.id)}
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </span>
                 </div>
               </div>
-            </div>
+            </motion.a>
           ))}
         </div>
       )}

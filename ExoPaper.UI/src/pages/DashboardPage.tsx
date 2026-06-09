@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Sparkles, Brain, X, BookOpen, ChevronRight } from "lucide-react";
+import { motion, useScroll, useTransform } from "framer-motion";
 import Header from "../components/layout/Header";
 import StatsOverview from "../components/dashboard/StatsOverview";
 import DiscoveryChart from "../components/dashboard/DiscoveryChart";
@@ -95,83 +96,130 @@ export default function DashboardPage() {
       });
   };
 
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    scrollContainerRef.current = document.getElementById("main-scroll-container");
+    setIsReady(true);
+  }, []);
+
+  const { scrollYProgress } = useScroll({
+    container: isReady && scrollContainerRef.current ? scrollContainerRef : undefined,
+  });
+
+  const section1Opacity = useTransform(scrollYProgress, [0, 0.25], [1, 0]);
+  const section1Y = useTransform(scrollYProgress, [0, 0.25], [0, -60]);
+
   return (
-    <div className="h-screen w-full flex flex-col justify-between pt-24 pb-4 pl-20 pr-4 lg:pl-28 lg:pr-8 text-[#D8DEE9] overflow-hidden relative">
-      {/* 1. Header Section */}
-      <div className="pointer-events-auto">
-        <Header />
-      </div>
-
-      {/* 2. Middle Section (Flex-grow, centered) */}
-      <div className="flex-grow flex flex-col items-center justify-center text-center pointer-events-none min-h-0 z-20 relative w-full max-w-4xl mx-auto mb-4">
-        {/* Subtle radial gradient background for text readability */}
-        <div className="absolute inset-0 bg-radial from-[#1e222a]/80 via-transparent to-transparent -z-10 pointer-events-none scale-150" />
-
-        <div className="animate-hero-reveal inline-flex items-center gap-2 rounded-full border border-[#B48EAD]/30 bg-[#2E3440]/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#B48EAD] backdrop-blur-md pointer-events-auto">
-          <Sparkles className="h-3.5 w-3.5" />
-          {t("hero.kicker")}
+    <div className="w-full text-[#D8DEE9] relative">
+      {/* SECTION 1: The Ambient Hero Screen */}
+      <motion.section
+        className="h-screen w-full flex flex-col items-center justify-center relative p-6 pointer-events-none"
+        style={{ opacity: section1Opacity, y: section1Y }}
+      >
+        <div className="absolute top-0 left-0 right-0 p-4 pl-20 lg:pl-28 z-50 pointer-events-auto">
+          <Header />
         </div>
 
-        <h1
-          className="animate-hero-reveal mt-4 text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl drop-shadow-[0_0_15px_rgba(216,222,233,0.3)] pointer-events-auto"
-          style={{ animationDelay: "0.1s" }}
-        >
-          <span className="bg-gradient-to-r from-[#ECEFF4] via-[#88C0D0] to-[#5E81AC] bg-clip-text text-transparent">
-            {t("hero.title")}
-          </span>
-        </h1>
+        <div className="flex flex-col items-center justify-center text-center max-w-4xl w-full">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="inline-flex items-center gap-2 rounded-full border border-[#B48EAD]/30 bg-[#2E3440]/60 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-[#B48EAD] backdrop-blur-md pointer-events-auto"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {t("hero.kicker")}
+          </motion.div>
 
-        <p
-          className="animate-hero-reveal mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-[#ECEFF4] sm:text-base drop-shadow-md pointer-events-auto font-medium"
-          style={{ animationDelay: "0.2s" }}
-        >
-          {t("hero.subtitle")}
-        </p>
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
+            className="mt-4 text-balance text-3xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] pointer-events-auto"
+          >
+            <span className="bg-gradient-to-r from-[#ECEFF4] via-[#88C0D0] to-[#5E81AC] bg-clip-text text-transparent">
+              {t("hero.title")}
+            </span>
+          </motion.h1>
 
-        <div
-          className="animate-hero-reveal mx-auto mt-6 w-full max-w-2xl text-left pointer-events-auto"
-          style={{ animationDelay: "0.3s" }}
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
+            className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-[#ECEFF4] sm:text-base drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] pointer-events-auto font-medium"
+          >
+            {t("hero.subtitle")}
+          </motion.p>
+
+          <motion.div
+            initial={{ width: "50%", opacity: 0 }}
+            animate={{ width: "100%", opacity: 1 }}
+            transition={{ duration: 1.0, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="mx-auto mt-6 max-w-2xl text-left pointer-events-auto drop-shadow-[0_4px_12px_rgba(0,0,0,0.6)]"
+          >
+            <div className="group relative w-full">
+              <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-[#B48EAD] to-[#88C0D0] opacity-0 blur transition duration-500 group-hover:opacity-20 group-focus-within:opacity-40"></div>
+              <div className="relative">
+                <HybridSearchBar onSearch={handleGlobalSearch} isSearchingGlobal={isSearching || streaming} />
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </motion.section>
+
+      {/* SECTION 2: Holographic Metrics Layer */}
+      <section className="h-screen w-full flex flex-col justify-center items-center p-8 md:p-16 pl-20 lg:pl-28 pointer-events-none">
+        <div className="w-full max-w-6xl pointer-events-auto">
+          <StatsOverview />
+        </div>
+      </section>
+
+      {/* SECTION 3: Deep Analytics Terminal */}
+      <section className="min-h-screen w-full flex flex-col lg:flex-row items-center justify-center p-8 lg:p-16 pl-20 lg:pl-28 gap-8 pointer-events-none">
+        
+        <motion.div 
+          className="w-full lg:w-7/12 pointer-events-auto min-h-0"
+          initial={{ opacity: 0, x: -50 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={{ amount: 0.3, once: true }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
         >
-          <div className="group relative">
-            <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-[#B48EAD] to-[#88C0D0] opacity-0 blur transition duration-500 group-hover:opacity-20 group-focus-within:opacity-40"></div>
-            <div className="relative">
-              <HybridSearchBar onSearch={handleGlobalSearch} isSearchingGlobal={isSearching || streaming} />
+          <div className="h-[400px] rounded-2xl border border-[#D8DEE9]/10 bg-[#2E3440]/30 backdrop-blur-xl shadow-2xl flex flex-col relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent pointer-events-none z-0" />
+            <div className="relative z-10 flex flex-col h-full p-6">
+              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-[#81A1C1] shrink-0 drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)]">
+                {t("dash.discoveryMethods")}
+              </h3>
+              <div className="flex-grow overflow-hidden relative min-h-0">
+                <DiscoveryChart />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </motion.div>
 
-      {/* 3. Bottom Section (Metrics and Panels, min-h-0 for flex parent) */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 pointer-events-none z-10 shrink-0 mb-2 min-h-0 w-full">
-        
-        <div className="lg:col-span-12 pointer-events-auto animate-slide-in-right" style={{ animationDelay: "0.4s", animationFillMode: "both" }}>
-          <div className="rounded-2xl border border-[#D8DEE9]/10 bg-[#2E3440]/40 backdrop-blur-xl p-4 shadow-lg">
-             <StatsOverview />
+        <motion.div 
+          className="w-full lg:w-5/12 pointer-events-auto min-h-0"
+          initial={{ opacity: 0, x: 50 }}
+          whileInView={{ opacity: 1, x: 0 }}
+          viewport={{ amount: 0.3, once: true }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        >
+          <div className="h-[400px] rounded-2xl border border-[#D8DEE9]/10 bg-[#2E3440]/30 backdrop-blur-xl shadow-2xl flex flex-col relative overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent pointer-events-none z-0" />
+            <div className="relative z-10 flex flex-col h-full p-6">
+              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-[#81A1C1] shrink-0 drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)]">
+                {t("dash.liveFeed")}
+              </h3>
+              <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0">
+                <RecentEventsPanel />
+              </div>
+            </div>
           </div>
-        </div>
+        </motion.div>
 
-        <div className="hidden lg:block lg:col-span-7 pointer-events-auto animate-slide-in-right min-h-0" style={{ animationDelay: "0.5s", animationFillMode: "both" }}>
-          <div className="h-[210px] rounded-2xl border border-[#D8DEE9]/10 bg-[#2E3440]/40 backdrop-blur-xl p-4 shadow-lg flex flex-col min-h-0">
-             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#81A1C1] shrink-0">
-              {t("dash.discoveryMethods")}
-             </h3>
-             <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0">
-               <DiscoveryChart />
-             </div>
-          </div>
-        </div>
-
-        <div className="hidden lg:block lg:col-span-5 pointer-events-auto animate-slide-in-right min-h-0" style={{ animationDelay: "0.6s", animationFillMode: "both" }}>
-          <div className="h-[210px] rounded-2xl border border-[#D8DEE9]/10 bg-[#2E3440]/40 backdrop-blur-xl p-4 shadow-lg flex flex-col min-h-0">
-             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#81A1C1] shrink-0">
-              {t("dash.liveFeed")}
-             </h3>
-             <div className="flex-grow overflow-y-auto custom-scrollbar min-h-0">
-               <RecentEventsPanel />
-             </div>
-          </div>
-        </div>
-      </div>
+      </section>
 
       {/* 4. Sliding Glassmorphic RAG Search Side Panel */}
       <div

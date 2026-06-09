@@ -43,6 +43,10 @@ public class ExoplanetsController : ControllerBase
     public async Task<IActionResult> GetStats(CancellationToken ct)
         => Ok(await _mediator.Send(new GetDiscoveryStatsQuery(), ct));
 
+    [HttpGet("hwo-count")]
+    public async Task<IActionResult> GetHwoCount(CancellationToken ct)
+        => Ok(new { count = await _mediator.Send(new GetHwoCandidateCountQuery(), ct) });
+
     [HttpGet("by-id")]
     public async Task<IActionResult> GetById([FromQuery] string id, CancellationToken ct)
     {
@@ -66,9 +70,11 @@ public class ExoplanetsController : ControllerBase
     }
 
     [HttpGet("uncertainty")]
-    public async Task<IActionResult> GetUncertainty([FromQuery] string id, CancellationToken ct)
+    public async Task<IActionResult> GetUncertainty(
+        [FromQuery] string id, [FromQuery] bool regenerate = false, CancellationToken ct = default)
     {
         var docId = id.StartsWith("exoplanets/", StringComparison.OrdinalIgnoreCase) ? id : $"exoplanets/{id}";
-        return Ok(await _mediator.Send(new GetUncertaintySummaryQuery { ExoplanetId = docId }, ct));
+        return Ok(await _mediator.Send(
+            new GetUncertaintySummaryQuery { ExoplanetId = docId, Regenerate = regenerate }, ct));
     }
 }
