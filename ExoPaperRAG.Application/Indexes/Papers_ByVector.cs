@@ -1,4 +1,5 @@
 using Raven.Client.Documents.Indexes;
+using Raven.Client.Documents.Indexes.Vector;
 using ExoPaperRAG.Domain.Entities;
 using System.Linq;
 
@@ -28,6 +29,9 @@ namespace ExoPaperRAG.Application.Indexes
 
             // Vector search requires the Corax search engine.
             SearchEngineType = Raven.Client.Documents.Indexes.SearchEngineType.Corax;
+            
+            // Explicitly mark the field as a vector field for Corax
+            VectorIndexes.Add(x => x.Vector, new VectorOptions());
         }
     }
 }
