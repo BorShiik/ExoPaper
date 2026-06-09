@@ -5,7 +5,12 @@ import { hybridSearch } from "../../api/papers";
 import SearchResults from "./SearchResults";
 import { useT } from "../../i18n/LanguageContext";
 
-export default function HybridSearchBar() {
+interface Props {
+  onSearch?: (searchText: string, maxMass: number | null, discoveryMethod: string, take: number) => void;
+  isSearchingGlobal?: boolean;
+}
+
+export default function HybridSearchBar({ onSearch, isSearchingGlobal }: Props) {
   const t = useT();
   const [searchText, setSearchText] = useState("");
   const [maxMass, setMaxMass] = useState<number | null>(null);
@@ -18,6 +23,10 @@ export default function HybridSearchBar() {
 
   const handleSearch = async () => {
     if (!searchText.trim()) return;
+    if (onSearch) {
+      onSearch(searchText.trim(), maxMass, discoveryMethod, take);
+      return;
+    }
     setLoading(true);
     setSearched(true);
     try {
@@ -43,7 +52,11 @@ export default function HybridSearchBar() {
 
   return (
     <div className="space-y-4 animate-fade-in-up">
-      <div className="glass glow-purple rounded-xl p-1">
+      <div className={`glass rounded-xl p-1 transition-all duration-500 ${
+        isSearchingGlobal 
+          ? "animate-search-pulse border-[#B48EAD]" 
+          : "glow-purple"
+      }`}>
         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
           <div className="flex items-center gap-2 flex-1 px-4">
             <Brain className="h-5 w-5 text-accent-purple shrink-0" />

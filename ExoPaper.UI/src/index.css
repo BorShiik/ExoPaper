@@ -138,6 +138,40 @@ body {
   100% { background-position: -200% 0; }
 }
 
+@keyframes shimmer-aurora {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+.animate-shimmer-aurora {
+  background: linear-gradient(
+    90deg,
+    rgba(46, 52, 64, 0.4) 25%,
+    rgba(136, 192, 208, 0.3) 45%,
+    rgba(180, 142, 173, 0.3) 55%,
+    rgba(46, 52, 64, 0.4) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-aurora 2.5s infinite linear;
+}
+
+@keyframes search-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(180, 142, 173, 0.15), 0 0 5px rgba(136, 192, 208, 0.05);
+    border-color: rgba(180, 142, 173, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(180, 142, 173, 0.55), 0 0 12px rgba(136, 192, 208, 0.25);
+    border-color: rgba(180, 142, 173, 0.65);
+  }
+}
+.animate-search-pulse {
+  animation: search-glow-pulse 2s ease-in-out infinite;
+}
+
 /* Hero gradient drift */
 @keyframes auroraDrift {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.55; }

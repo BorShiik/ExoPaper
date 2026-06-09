@@ -7,7 +7,6 @@ import * as THREE from "three";
 import type { Exoplanet } from "../../types";
 import StarMesh from "./StarMesh";
 import PlanetMesh from "./PlanetMesh";
-import OrbitRing from "./OrbitRing";
 import DustDisk from "./DustDisk";
 import CanvasErrorBoundary from "../common/CanvasErrorBoundary";
 import { hashStringToSeed } from "./stellar";
@@ -61,14 +60,15 @@ export default function ExoplanetScene({ planet }: Props) {
 
             <StarMesh temperature={planet.stellarEffectiveTemperatureK} jitter={hasJitter} position={[8, 4, -5]} />
 
-            <OrbitRing radius={9} position={[8, 4, -5]} />
-
             <PlanetMesh
               radiusEarth={planet.radiusEarth}
               seed={seed}
               orbitRadius={9}
+              semiMajorAxisAu={planet.semiMajorAxisAu}
               orbitalPeriod={planet.orbitalPeriodDays}
               isHwoCandidate={isHwoCandidate}
+              position={[8, 4, -5]}
+              starPosition={[8, 4, -5]}
             />
 
             {showDust && <DustDisk />}
