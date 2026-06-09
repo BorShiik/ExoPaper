@@ -8,6 +8,7 @@ import RecentEventsPanel from "../components/dashboard/RecentEventsPanel";
 import HybridSearchBar from "../components/search/HybridSearchBar";
 import { useT } from "../i18n/LanguageContext";
 import { useAppStore } from "../stores/appStore";
+import { arxivUrl } from "../lib/utils";
 
 export default function DashboardPage() {
   const t = useT();
@@ -339,6 +340,7 @@ export default function DashboardPage() {
                 {searchResults.sources.map((s, i) => (
                   <div
                     key={s.paperId}
+                    onClick={() => window.open(arxivUrl(s.paperId), "_blank", "noopener,noreferrer")}
                     className="group flex items-start gap-3 rounded-xl border border-[#434C5E]/30 bg-[#2E3440]/30 hover:bg-[#3B4252]/50 hover:border-[#434C5E]/60 p-3 transition-all duration-200 cursor-pointer pointer-events-auto"
                   >
                     <span className="text-[#88C0D0] font-mono text-xs font-bold shrink-0 mt-0.5">

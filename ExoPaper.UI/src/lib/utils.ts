@@ -59,3 +59,16 @@ export function starColorHex(tempK: number | null | undefined): number {
   if (tempK < 7500) return 0xfff8ee;
   return 0x88bbff;
 }
+
+/** arXiv preprints use the tail of the document id without the collection prefix. */
+export function extractArxivId(paperId: string): string {
+  return paperId.replace(/^papers\//i, "");
+}
+
+/** Builds a valid arXiv abstract URL. */
+export function arxivUrl(paperId: string): string {
+  const raw = extractArxivId(paperId);
+  if (raw.includes("/") || raw.includes(".")) return `https://arxiv.org/abs/${raw}`;
+  if (/^\d{7}$/.test(raw)) return `https://arxiv.org/abs/astro-ph/${raw}`;
+  return `https://arxiv.org/abs/${raw}`;
+}

@@ -4,29 +4,13 @@ import { FileText, Calendar, BookOpen, User, ExternalLink } from "lucide-react";
 import { getPapersByExoplanet } from "../../api/papers";
 import type { Paper } from "../../types";
 import { useT } from "../../i18n/LanguageContext";
+import { arxivUrl, extractArxivId } from "../../lib/utils";
 
 interface Props {
   planetId: string;
 }
 
-/** arXiv preprints use the tail of the document id without the collection prefix. */
-function extractArxivId(paperId: string): string {
-  return paperId.replace(/^papers\//i, "");
-}
 
-/**
- * Builds a valid arXiv abstract URL. Old-scheme ids (7 plain digits like
- * "0506011") lost their archive class during OAI harvest — our harvest set is
- * astro-ph, so we reconstruct the canonical "astro-ph/NNNNNNN" form. New-scheme
- * ids ("0704.0001") and ids that already carry an archive ("astro-ph/0506011")
- * are used as-is.
- */
-function arxivUrl(paperId: string): string {
-  const raw = extractArxivId(paperId);
-  if (raw.includes("/") || raw.includes(".")) return `https://arxiv.org/abs/${raw}`;
-  if (/^\d{7}$/.test(raw)) return `https://arxiv.org/abs/astro-ph/${raw}`;
-  return `https://arxiv.org/abs/${raw}`;
-}
 
 export default function LinkedPapers({ planetId }: Props) {
   const t = useT();
