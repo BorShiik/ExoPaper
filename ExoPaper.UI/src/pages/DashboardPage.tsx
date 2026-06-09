@@ -8,7 +8,11 @@ import RecentEventsPanel from "../components/dashboard/RecentEventsPanel";
 import HybridSearchBar from "../components/search/HybridSearchBar";
 import { useT } from "../i18n/LanguageContext";
 import { useAppStore } from "../stores/appStore";
-import { arxivUrl } from "../lib/utils";
+import { formatValue, arxivUrl } from "../lib/utils";
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 export default function DashboardPage() {
   const t = useT();
@@ -320,12 +324,14 @@ export default function DashboardPage() {
                 <Sparkles className="h-4 w-4" />
                 <span>AI SYNTHESIS</span>
               </div>
-              <p className="text-xs sm:text-[13px] text-[#ECEFF4] leading-relaxed whitespace-pre-wrap font-medium">
-                {searchResults.answer}
+              <div className="text-xs sm:text-[13px] text-[#ECEFF4] leading-relaxed whitespace-pre-wrap font-medium markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                  {searchResults.answer}
+                </ReactMarkdown>
                 {streaming && (
                   <span className="ml-1 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-[#B48EAD]" />
                 )}
-              </p>
+              </div>
             </div>
           )}
 
