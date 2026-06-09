@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: ExoPaper.UI/package-lock.json
 
       - name: Install
-        run: npm ci
+        run: npm install
 
       - name: Build
         run: npm run build
