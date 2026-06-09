@@ -6,6 +6,7 @@ using MediatR;
 using Raven.Client.Documents;
 using Raven.Client.Documents.Linq;
 using Raven.Client.Documents.Session;
+using ExoPaperRAG.Application.Indexes;
 
 namespace ExoPaperRAG.Application.Features.Rag;
 
@@ -140,16 +141,15 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
         int take,
         CancellationToken ct)
     {
-        var query = session.Advanced.AsyncDocumentQuery<Paper>("Papers/ByVector");
+        var queryable = session.Query<Paper, Papers_ByVector>();
 
         // AND the planet filter with the vector search so only linked papers are ranked.
         if (!string.IsNullOrWhiteSpace(planetDocId))
-            query = query.WhereEquals(nameof(Paper.ExoplanetIds), planetDocId);
+            queryable = queryable.Where(x => x.ExoplanetIds.Contains(planetDocId));
 
-        return await query
+        return await queryable
             .VectorSearch(
-                fieldName => fieldName.WithEmbedding(
-                    "Vector", Raven.Client.Documents.Indexes.Vector.VectorEmbeddingType.Single),
+                indexField => indexField.WithField(x => x.Vector),
                 factory => factory.ByEmbedding(queryVector))
             .Take(take)
             .ToListAsync(ct);
