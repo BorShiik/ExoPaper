@@ -3,6 +3,7 @@ using Raven.Client.Documents;
 using Raven.Client.Documents.Linq;
 using ExoPaperRAG.Application.Abstractions;
 using ExoPaperRAG.Domain.Entities;
+using ExoPaperRAG.Application.Indexes;
 
 namespace ExoPaperRAG.Application.Features.Papers.Queries;
 
@@ -53,9 +54,9 @@ public class SearchHybridQueryHandler : IRequestHandler<SearchHybridQuery, Searc
 
         // Step 3: Vector search on Papers_ByVector (Corax) index
         var vectorResults = await session
-            .Advanced.AsyncDocumentQuery<Paper>("Papers/ByVector")
+            .Query<Paper, Papers_ByVector>()
             .VectorSearch(
-                fieldName => fieldName.WithEmbedding("Vector", Raven.Client.Documents.Indexes.Vector.VectorEmbeddingType.Single),
+                indexField => indexField.WithField(x => x.Vector),
                 factory => factory.ByEmbedding(queryVector))
             .Take(request.Take * 2) // fetch more to allow post-filtering
             .ToListAsync(ct);

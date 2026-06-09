@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.JsonPatch.Helpers;
+using Microsoft.AspNetCore.JsonPatch.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,9 +11,9 @@ namespace ExoPaperRAG.Infrastructure.Services
     public class AdqlQueryBuilder
     {
         private readonly List<string> _selectColumns = new();
-        private string _fromTable;
+        private string? _fromTable;
         private readonly List<string> _whereConditions = new();
-        private string _orderBy;
+        private string? _orderBy;
         private int? _top;
 
         public AdqlQueryBuilder Select(params string[] columns)
@@ -36,7 +36,7 @@ namespace ExoPaperRAG.Infrastructure.Services
 
         public AdqlQueryBuilder Where(string column, string op, object value)
         {
-            string formattedValue = value is string s ? $"'{s}'" : value.ToString().Replace(',', '.');  
+            string formattedValue = value is string s ? $"'{s}'" : value?.ToString()?.Replace(',', '.') ?? "NULL";  
             _whereConditions.Add($"{column} {op} {formattedValue}");
             return this;
         }
