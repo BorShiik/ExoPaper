@@ -80,8 +80,13 @@ namespace ExoPaperRAG.Api
                 .AddPolicyHandler(GetRetryPolicy())
                 .AddPolicyHandler(GetCircuitBreakerPolicy());
 
-            builder.Services.AddHttpClient<IArxivClient, ArxivClient>()
-                .AddPolicyHandler(GetRetryPolicy());
+            builder.Services.AddHttpClient<IArxivClient, ArxivClient>((sp, client) =>
+                {
+                    var arxiv = sp.GetRequiredService<IOptions<ArxivSettings>>().Value;
+                    // OAI-PMH large-range pages can take minutes; the 100s default cancels them.
+                    client.Timeout = TimeSpan.FromSeconds(arxiv.HarvestTimeoutSeconds);
+                })
+                .AddPolicyHandler(GetArxivRetryPolicy());
 
             builder.Services.AddHttpClient<IOllamaClient, OllamaClient>()
                 .AddPolicyHandler(GetRetryPolicy());
@@ -167,6 +172,17 @@ namespace ExoPaperRAG.Api
             {
                 return HttpPolicyExtensions
                     .HandleTransientHttpError()
+                    .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+            }
+
+            // arXiv flow-control 503s are handled inside ArxivClient (honouring Retry-After),
+            // so this policy retries only connection faults and non-503 server errors.
+            static IAsyncPolicy<HttpResponseMessage> GetArxivRetryPolicy()
+            {
+                return Policy<HttpResponseMessage>
+                    .Handle<HttpRequestException>()
+                    .OrResult(r => (int)r.StatusCode >= 500 &&
+                                   r.StatusCode != System.Net.HttpStatusCode.ServiceUnavailable)
                     .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
             }
 

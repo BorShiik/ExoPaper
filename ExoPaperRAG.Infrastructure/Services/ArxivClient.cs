@@ -1,3 +1,4 @@
+using System.Net;
 using System.Xml.Linq;
 using ExoPaperRAG.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
@@ -88,10 +89,7 @@ public class ArxivClient : IArxivClient
             await Task.Delay(_settings.RequestDelayMs, ct);
 
             _logger.LogInformation("[arXiv] Fetching: {Url}", url);
-            var response = await _httpClient.GetAsync(url, ct);
-            response.EnsureSuccessStatusCode();
-
-            var xml = await response.Content.ReadAsStringAsync(ct);
+            var xml = await GetWithFlowControlAsync(url, ct);
             var doc = XDocument.Parse(xml);
 
             // Early return: check for OAI-PMH error element
@@ -117,6 +115,55 @@ public class ArxivClient : IArxivClient
         {
             _rateLimiter.Release();
         }
+    }
+
+    /// <summary>
+    /// Performs the OAI-PMH GET, honouring arXiv's flow control: a <c>503 Service Unavailable</c>
+    /// with a <c>Retry-After</c> header means "wait, then re-issue the same request". We respect
+    /// that header (Polly's generic transient retry would back off far too aggressively and ignore
+    /// the server-specified delay) and only give up after <see cref="ArxivSettings.MaxFlowControlRetries"/>.
+    /// </summary>
+    private async Task<string> GetWithFlowControlAsync(string url, CancellationToken ct)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+
+            if (response.StatusCode == HttpStatusCode.ServiceUnavailable &&
+                attempt < _settings.MaxFlowControlRetries)
+            {
+                var wait = GetRetryAfter(response)
+                    ?? TimeSpan.FromSeconds(_settings.DefaultRetryAfterSeconds);
+
+                _logger.LogInformation(
+                    "[arXiv] Flow control (503). Waiting {Seconds}s before retry {Attempt}/{Max}.",
+                    wait.TotalSeconds, attempt + 1, _settings.MaxFlowControlRetries);
+
+                await Task.Delay(wait, ct);
+                continue;
+            }
+
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync(ct);
+        }
+    }
+
+    /// <summary>Reads a <c>Retry-After</c> header expressed either as a delay or an absolute date.</summary>
+    private static TimeSpan? GetRetryAfter(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        if (retryAfter is null) return null;
+
+        if (retryAfter.Delta is { } delta && delta > TimeSpan.Zero)
+            return delta;
+
+        if (retryAfter.Date is { } date)
+        {
+            var fromNow = date - DateTimeOffset.UtcNow;
+            if (fromNow > TimeSpan.Zero) return fromNow;
+        }
+
+        return null;
     }
 
     private ArxivHarvestPage ParseListRecords(XDocument doc)

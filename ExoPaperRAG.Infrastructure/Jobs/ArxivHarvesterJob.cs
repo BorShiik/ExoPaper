@@ -57,8 +57,9 @@ public class ArxivHarvesterJob : IJob
                 tracker = SyncTracker.CreateForProvider(ProviderId);
                 await session.StoreAsync(tracker, ct);
                 await session.SaveChangesAsync(ct);
-                fromDate = DateTime.UtcNow.AddYears(-1);
-                _logger.LogInformation("[ArxivHarvester] First run — harvesting papers from the last 1 year.");
+                fromDate = DateTime.UtcNow.AddDays(-_settings.FirstRunLookbackDays);
+                _logger.LogInformation("[ArxivHarvester] First run — harvesting papers from the last {Days} days.",
+                    _settings.FirstRunLookbackDays);
             }
             else if (tracker.LastSyncUtc > DateTime.MinValue)
             {
@@ -67,8 +68,8 @@ public class ArxivHarvesterJob : IJob
             }
             else
             {
-                // If it was created but never succeeded, also use 1 year ago
-                fromDate = DateTime.UtcNow.AddYears(-1);
+                // If it was created but never succeeded, reuse the first-run lookback window.
+                fromDate = DateTime.UtcNow.AddDays(-_settings.FirstRunLookbackDays);
             }
 
             int totalRecords = 0;
@@ -129,11 +130,18 @@ public class ArxivHarvesterJob : IJob
     {
         int count = 0;
 
-        for (int i = 0; i < records.Count; i += BatchSize)
+        // Keep only papers in a configured subcategory (e.g. astro-ph.EP). An empty
+        // RelevantCategories list disables filtering.
+        var relevant = FilterRelevant(records);
+        if (relevant.Count < records.Count)
+            _logger.LogInformation("[ArxivHarvester] Kept {Kept}/{Total} records after category filter.",
+                relevant.Count, records.Count);
+
+        for (int i = 0; i < relevant.Count; i += BatchSize)
         {
             using var session = _store.OpenAsyncSession();
             session.Advanced.MaxNumberOfRequestsPerSession = 1000;
-            var batch = records.Skip(i).Take(BatchSize);
+            var batch = relevant.Skip(i).Take(BatchSize);
 
             foreach (var record in batch)
             {
@@ -186,5 +194,20 @@ public class ArxivHarvesterJob : IJob
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Filters records down to those tagged with at least one configured relevant category.
+    /// Returns the input unchanged when no categories are configured.
+    /// </summary>
+    private List<ArxivRecord> FilterRelevant(List<ArxivRecord> records)
+    {
+        var wanted = _settings.RelevantCategories;
+        if (wanted is null || wanted.Count == 0)
+            return records;
+
+        return records
+            .Where(r => r.Categories.Any(c => wanted.Contains(c, StringComparer.OrdinalIgnoreCase)))
+            .ToList();
     }
 }
