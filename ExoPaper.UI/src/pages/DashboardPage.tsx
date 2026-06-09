@@ -8,7 +8,7 @@ import RecentEventsPanel from "../components/dashboard/RecentEventsPanel";
 import HybridSearchBar from "../components/search/HybridSearchBar";
 import { useT } from "../i18n/LanguageContext";
 import { useAppStore } from "../stores/appStore";
-import { formatValue, arxivUrl } from "../lib/utils";
+import { arxivUrl } from "../lib/utils";
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
