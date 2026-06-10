@@ -1,13 +1,14 @@
-import React, { Suspense, useMemo, useRef } from "react";
+import React, { Suspense, lazy, useMemo, useRef } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Stars } from "@react-three/drei";
-import { EffectComposer, Bloom, Vignette, ToneMapping, SMAA } from "@react-three/postprocessing";
-import { ToneMappingMode } from "postprocessing";
+import { Stars, AdaptiveDpr, PerformanceMonitor } from "@react-three/drei";
+import { usePageVisible } from "../../lib/usePageVisible";
 import * as THREE from "three";
 import StarMesh from "./StarMesh";
 import PlanetMesh from "./PlanetMesh";
 import CanvasErrorBoundary from "../common/CanvasErrorBoundary";
 import { hashStringToSeed } from "./stellar";
+
+const ScenePostFX = lazy(() => import("./ScenePostFX"));
 
 const STAR_POS: [number, number, number] = [3.2, 1.2, -4];
 
@@ -138,12 +139,13 @@ function Scene() {
         />
       ))}
 
-      <EffectComposer multisampling={0}>
-        <SMAA />
-        <Bloom luminanceThreshold={0.85} intensity={1.0} mipmapBlur radius={0.85} />
-        <Vignette eskil={false} offset={0.2} darkness={0.92} />
-        <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-      </EffectComposer>
+      <ScenePostFX
+        bloomThreshold={0.85}
+        bloomIntensity={1.0}
+        bloomRadius={0.85}
+        vignetteOffset={0.2}
+        vignetteDarkness={0.92}
+      />
     </>
   );
 }
@@ -153,11 +155,13 @@ function Scene() {
  * (pointer-events handled by the parent) so overlay UI stays usable.
  */
 const CosmicHero = React.memo(function CosmicHero() {
+  const visible = usePageVisible();
   return (
     <div className="absolute inset-0" aria-hidden="true">
       <CanvasErrorBoundary>
         <Canvas
           camera={{ position: [0, 2.5, 14], fov: 55 }}
+          frameloop={visible ? "always" : "never"}
           gl={{
             antialias: true,
             alpha: true,
@@ -167,6 +171,8 @@ const CosmicHero = React.memo(function CosmicHero() {
           dpr={[1, 1.75]}
           style={{ background: "transparent" }}
         >
+          <PerformanceMonitor />
+          <AdaptiveDpr pixelated />
           <Suspense fallback={null}>
             <Scene />
           </Suspense>

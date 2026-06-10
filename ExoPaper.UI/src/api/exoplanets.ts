@@ -1,5 +1,5 @@
 import api from "./client";
-import type { Exoplanet, DiscoveryStats, UncertaintySummary } from "../types";
+import type { Exoplanet, DiscoveryStats, UncertaintySummary, PlanetAiSummaryResult } from "../types";
 
 export async function getExoplanets(params?: {
   discoveryMethod?: string;
@@ -39,6 +39,29 @@ export async function getUncertaintySummary(
 ): Promise<UncertaintySummary> {
   const { data } = await api.get<UncertaintySummary>("/exoplanets/uncertainty", {
     params: { id, regenerate },
+  });
+  return data;
+}
+
+export async function getPlanetSummary(
+  id: string,
+  regenerate = false
+): Promise<PlanetAiSummaryResult> {
+  const { data } = await api.get<PlanetAiSummaryResult>("/exoplanets/summary", {
+    params: { id, regenerate },
+  });
+  return data;
+}
+
+export interface HarvestPapersResult {
+  linkedCount: number;
+  message: string;
+}
+
+/** On-demand: search arXiv for this planet and link matching papers. */
+export async function harvestPapersForPlanet(id: string): Promise<HarvestPapersResult> {
+  const { data } = await api.post<HarvestPapersResult>("/exoplanets/harvest", null, {
+    params: { id },
   });
   return data;
 }

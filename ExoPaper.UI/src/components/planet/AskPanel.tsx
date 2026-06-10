@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkles, Loader2, Send } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { useT } from "../../i18n/LanguageContext";
+import MarkdownText from "../ui/MarkdownText";
 
 interface AskSource {
   paperId: string;
@@ -115,12 +116,12 @@ export default function AskPanel({ exoplanetId }: Props) {
           {streaming && !answer ? (
             <p className="text-[11px] text-text-muted">{t("ask.thinking")}</p>
           ) : (
-            <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">
-              {answer}
+            <div className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap font-medium">
+              <MarkdownText text={answer} className="inline-block" />
               {streaming && (
                 <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-0.5 animate-pulse bg-accent-purple" />
               )}
-            </p>
+            </div>
           )}
         </div>
       )}

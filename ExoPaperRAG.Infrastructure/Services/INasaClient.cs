@@ -13,6 +13,9 @@ namespace ExoPaperRAG.Infrastructure.Services
     public interface INasaClient
     {
         Task<List<ExoplanetDto>> FetchPlanetAcync(string adqlQuery, CancellationToken cancellationToken = default) ;
+
+        /// <summary>Runs an ADQL query against the "ps" table and returns per-publication measurement rows.</summary>
+        Task<List<PlanetMeasurementDto>> FetchMeasurementsAsync(string adqlQuery, CancellationToken cancellationToken = default);
     }
 
     public class NasaClient : INasaClient
@@ -30,6 +33,16 @@ namespace ExoPaperRAG.Infrastructure.Services
         }
         public async Task<List<ExoplanetDto>> FetchPlanetAcync(string adqlQuery, CancellationToken cancellationToken = default)
         {
+            return await QueryAsync<ExoplanetDto>(adqlQuery, cancellationToken);
+        }
+
+        public async Task<List<PlanetMeasurementDto>> FetchMeasurementsAsync(string adqlQuery, CancellationToken cancellationToken = default)
+        {
+            return await QueryAsync<PlanetMeasurementDto>(adqlQuery, cancellationToken);
+        }
+
+        private async Task<List<T>> QueryAsync<T>(string adqlQuery, CancellationToken cancellationToken)
+        {
             var requestData = new[]
             {
                 new KeyValuePair<string, string>("REQUEST", "doQuery"),
@@ -46,9 +59,8 @@ namespace ExoPaperRAG.Infrastructure.Services
 
             var jsonString = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            var planets = JsonSerializer.Deserialize<List<ExoplanetDto>>(jsonString, _jsonOptions);
-            return planets ?? new List<ExoplanetDto>();
-
+            var rows = JsonSerializer.Deserialize<List<T>>(jsonString, _jsonOptions);
+            return rows ?? new List<T>();
         }
     }
 }

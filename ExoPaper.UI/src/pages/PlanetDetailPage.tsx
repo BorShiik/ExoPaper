@@ -13,6 +13,7 @@ import UncertaintyPanel from "../components/planet/UncertaintyPanel";
 import LinkedPapers from "../components/planet/LinkedPapers";
 import AskPanel from "../components/planet/AskPanel";
 import ExoplanetScene from "../components/three/ExoplanetScene";
+import PlanetSummaryPanel from "../components/planet/PlanetSummaryPanel";
 
 type TabKey = "params" | "ai" | "lit";
 
@@ -56,8 +57,10 @@ export default function PlanetDetailPage() {
   ];
 
   return (
-    <div className="relative min-h-screen pointer-events-auto text-[#E5E9F0]">
-      <Header title={t("page.planet")} />
+    <div className="relative h-screen overflow-hidden pointer-events-auto text-[#E5E9F0]">
+      <div className="absolute top-4 left-0 w-full z-50">
+        <Header title={t("page.planet")} />
+      </div>
 
       {loading && (
         <div className="flex min-h-screen flex-col items-center justify-center gap-4">
@@ -138,6 +141,12 @@ export default function PlanetDetailPage() {
 
           {/* ───────── RIGHT 40% · telemetry HUD ───────── */}
           <div className="flex w-full flex-col border-l border-white/5 bg-gradient-to-b from-[#0a0e1a]/70 to-[#05070f]/40 pt-6 backdrop-blur-sm lg:h-screen lg:w-2/5 lg:pt-24">
+            
+            {/* AI Summary Panel */}
+            <div className="px-5">
+              <PlanetSummaryPanel planetId={planet.id} autoLoad={planet.hasCachedAiSummary ?? false} />
+            </div>
+
             {/* Tabs */}
             <div className="shrink-0 px-5">
               <div className="flex gap-1 rounded-xl border border-white/10 bg-[#0d1322]/60 p-1">

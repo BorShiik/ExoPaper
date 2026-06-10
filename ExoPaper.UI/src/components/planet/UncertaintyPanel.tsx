@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Brain, AlertTriangle, Cpu, RotateCcw } from "lucide-react";
 import { getUncertaintySummary } from "../../api/exoplanets";
 import type { UncertaintySummary } from "../../types";
 import { useT } from "../../i18n/LanguageContext";
+import MarkdownText from "../ui/MarkdownText";
 
 interface Props {
   planetId: string;
@@ -21,33 +22,12 @@ const DIAG_LINES = [
   ">> [LLM] Synthesizing empirical discrepancy report…",
 ];
 
-/** Highlights contradiction language: Aurora-yellow for conflicts, red for strong discrepancies. */
-function highlight(text: string): ReactNode[] {
-  const re =
-    /\b(significantly|significant|substantial|strong|large|severe|major)\b|\b(conflicts?|conflicting|discrepanc\w*|contradict\w*|disagree\w*|inconsistent|tensions?|uncertain\w*|differ\w*)\b/gi;
-  const out: ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const high = !!m[1];
-    out.push(
-      <span
-        key={k++}
-        className={
-          high
-            ? "rounded bg-[#BF616A]/15 px-1 font-semibold text-[#d98b92]"
-            : "rounded bg-[#EBCB8B]/15 px-1 font-medium text-[#EBCB8B]"
-        }
-      >
-        {m[0]}
-      </span>
-    );
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
+/** Compact numeric formatting for measurement ranges (handles very large/small values). */
+function fmt(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  const abs = Math.abs(v);
+  if (abs !== 0 && (abs >= 1e5 || abs < 1e-3)) return v.toExponential(2);
+  return Number(v.toFixed(3)).toString();
 }
 
 export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) {
@@ -167,10 +147,59 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
               <Brain className="h-3 w-3" />
               {t("unc.aiAnalysis")}
             </p>
-            <div className="whitespace-pre-wrap text-xs leading-relaxed text-[#cdd6e6]">
-              {highlight(data.analysisSummary)}
+            <div className="text-xs leading-relaxed text-[#cdd6e6]">
+              <MarkdownText text={data.analysisSummary} />
             </div>
           </div>
+
+          {data.disparities && data.disparities.length > 0 && (
+            <div>
+              <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-[#7a869c]">
+                {t("unc.disparities")}
+              </p>
+              <div className="space-y-2">
+                {data.disparities.map((d) => (
+                  <div
+                    key={d.parameter}
+                    className={`rounded-xl border bg-[#0d1322]/50 p-3 ${
+                      d.isConflicting
+                        ? "border-[#BF616A]/40 border-l-2 border-l-[#BF616A]"
+                        : "border-white/[0.06] border-l-2 border-l-[#A3BE8C]/50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-[#ECEFF4]">
+                        {d.parameter}
+                        {d.unit ? <span className="text-[#7a869c] ml-1">[{d.unit}]</span> : null}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          d.isConflicting
+                            ? "bg-[#BF616A]/15 text-[#d98b92]"
+                            : "bg-[#A3BE8C]/15 text-[#A3BE8C]"
+                        }`}
+                      >
+                        {d.isConflicting ? t("unc.conflict") : t("unc.consistent")}
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-[#9aa7bd]">
+                      <span className="text-[#cdd6e6]">
+                        {fmt(d.min)} – {fmt(d.max)}
+                      </span>
+                      {d.count > 1 && (
+                        <span>
+                          {d.spreadPercent.toFixed(0)}% {t("unc.spread")}
+                        </span>
+                      )}
+                      <span>
+                        {d.count} {t("unc.measurements")}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {conflictCount > 0 && (
             <div>
@@ -184,9 +213,9 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
                     className="rounded-xl border border-white/[0.06] border-l-2 border-l-[#EBCB8B]/60 bg-[#0d1322]/50 p-3"
                   >
                     <p className="line-clamp-1 text-xs font-semibold text-[#ECEFF4]">{c.paperTitle}</p>
-                    <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-[#9aa7bd]">
-                      {highlight(c.relevantText)}
-                    </p>
+                    <div className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-[#9aa7bd] font-medium">
+                      <MarkdownText text={c.relevantText} />
+                    </div>
                   </div>
                 ))}
               </div>

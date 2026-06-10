@@ -106,8 +106,26 @@ public class NasaSyncJob : IJob
     /// </summary>
     private async Task IncrementalSyncAsync(SyncTracker tracker, CancellationToken ct)
     {
-        _logger.LogInformation("[NasaSync] Incremental sync not supported for pscomppars. Running full sync.");
-        await SeedFullCatalogAsync(tracker, ct);
+        var since = tracker.LastSyncUtc.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        _logger.LogInformation("[NasaSync] Incremental sync — rows released since {Since}.", since);
+
+        // Only pull rows whose catalog release date is newer than the last successful sync.
+        var query = BuildSelectQuery()
+            .Where(NasaColumns.UpdateDate, ">", since)
+            .Build();
+
+        var dtos = await _nasaClient.FetchPlanetAcync(query, ct);
+
+        var upserted = dtos.Count > 0 ? await UpsertPlanetsAsync(dtos, ct) : 0;
+        _logger.LogInformation("[NasaSync] Incremental sync upserted {Count} planet(s).", upserted);
+
+        using var session = _store.OpenAsyncSession();
+        var freshTracker = await session.LoadAsync<SyncTracker>($"SyncTrackers/{ProviderId}", ct);
+        if (freshTracker != null)
+        {
+            freshTracker.MarkSuccess(upserted);
+            await session.SaveChangesAsync(ct);
+        }
     }
 
     /// <summary>
@@ -143,37 +161,17 @@ public class NasaSyncJob : IJob
 
                 var id = Exoplanet.BuildId(dto.Name);
 
+                var data = MapToScientificData(dto);
+
                 if (existing.TryGetValue(id, out var planet) && planet != null)
                 {
                     // Update in place — preserves Tags / HasEmbeddings / TagsProcessed
                     // unless a scientific field changed (then re-tagging is triggered).
-                    planet.ApplyScientificUpdate(
-                        dto.DiscoveryMethod,
-                        dto.MassEarth,
-                        dto.LowerBoundMassEarth,
-                        dto.RadiusEarth,
-                        dto.RadiusJupiter,
-                        dto.OrbitalPeriodDays,
-                        dto.Eccentricity,
-                        dto.SemiMajorAxisAu,
-                        dto.StellarEffectiveTemperatureK,
-                        dto.DistanceParsecs);
+                    planet.ApplyScientificUpdate(data);
                 }
                 else
                 {
-                    var created = Exoplanet.Create(
-                        name: dto.Name,
-                        discoveryMethod: dto.DiscoveryMethod,
-                        massEarth: dto.MassEarth,
-                        lowerBoundMassEarth: dto.LowerBoundMassEarth,
-                        radiusEarth: dto.RadiusEarth,
-                        radiusJupiter: dto.RadiusJupiter,
-                        orbitalPeriodDays: dto.OrbitalPeriodDays,
-                        eccentricity: dto.Eccentricity,
-                        semiMajorAxisAu: dto.SemiMajorAxisAu,
-                        stellarEffectiveTemperatureK: dto.StellarEffectiveTemperatureK,
-                        distanceParsecs: dto.DistanceParsecs);
-
+                    var created = Exoplanet.Create(dto.Name, data);
                     await session.StoreAsync(created, created.Id, ct);
                 }
 
@@ -190,18 +188,101 @@ public class NasaSyncJob : IJob
     {
         return new AdqlQueryBuilder()
             .Select(
-                NasaColumns.PlanetName,
-                NasaColumns.DiscoveryMethod,
-                NasaColumns.MassEarth,
-                NasaColumns.LowerBoundMassEarth,
-                NasaColumns.RadiusEarth,
-                NasaColumns.RadiusJupiter,
-                NasaColumns.OrbitalPeriod,
-                NasaColumns.OrbitalEccentricity,
-                NasaColumns.SemiMajorAxis,
-                NasaColumns.StellarEffTemp,
-                NasaColumns.Distance
+                // Identity / system
+                NasaColumns.PlanetName, NasaColumns.HostName, NasaColumns.PlanetLetter,
+                NasaColumns.NumberOfStars, NasaColumns.NumberOfPlanets,
+                NasaColumns.RightAscension, NasaColumns.Declination,
+                NasaColumns.VMagnitude, NasaColumns.KMagnitude, NasaColumns.GaiaMagnitude,
+                // Aliases
+                NasaColumns.HdName, NasaColumns.HipName, NasaColumns.TicId,
+                // Discovery
+                NasaColumns.DiscoveryMethod, NasaColumns.DiscoveryYear, NasaColumns.DiscoveryFacility,
+                NasaColumns.DiscoveryTelescope, NasaColumns.DiscoveryInstrument,
+                // Orbit
+                NasaColumns.OrbitalPeriod, NasaColumns.OrbitalEccentricity,
+                NasaColumns.SemiMajorAxis, NasaColumns.Inclination,
+                // Mass / radius / density
+                NasaColumns.MassEarth, NasaColumns.LowerBoundMassEarth, NasaColumns.MassJupiter,
+                NasaColumns.MassProvenance, NasaColumns.MsiniEarth,
+                NasaColumns.RadiusEarth, NasaColumns.RadiusJupiter, NasaColumns.Density,
+                // Climate
+                NasaColumns.EquilibriumTemperature, NasaColumns.InsolationFlux,
+                // Host star
+                NasaColumns.SpectralType, NasaColumns.StellarEffTemp, NasaColumns.StellarRadius,
+                NasaColumns.StellarMass, NasaColumns.StellarLuminosity, NasaColumns.StellarSurfaceGravity,
+                NasaColumns.StellarMetallicity, NasaColumns.StellarAge,
+                // System
+                NasaColumns.Distance,
+                // Quality (soltype / pl_refname come from the `ps` table in Phase 2)
+                NasaColumns.ControversialFlag
             )
             .From(NasaTables.ConfirmedPlanets);
+    }
+
+    /// <summary>Maps a raw NASA row to the domain's scientific-data transport record.</summary>
+    private static ExoplanetScientificData MapToScientificData(ExoplanetDto dto)
+    {
+        var aliases = new List<string>();
+        void AddAlias(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                aliases.Add(value!.Trim());
+        }
+        AddAlias(dto.HostName);
+        AddAlias(dto.HdName);
+        AddAlias(dto.HipName);
+        AddAlias(dto.TicId);
+
+        return new ExoplanetScientificData
+        {
+            HostName = dto.HostName,
+            PlanetLetter = dto.PlanetLetter,
+            Aliases = aliases.Distinct().ToList(),
+            NumberOfStars = dto.NumberOfStars.HasValue ? (int)dto.NumberOfStars.Value : null,
+            NumberOfPlanets = dto.NumberOfPlanets.HasValue ? (int)dto.NumberOfPlanets.Value : null,
+            RightAscension = dto.RightAscension,
+            Declination = dto.Declination,
+            VMagnitude = dto.VMagnitude,
+            KMagnitude = dto.KMagnitude,
+            GaiaMagnitude = dto.GaiaMagnitude,
+
+            DiscoveryMethod = dto.DiscoveryMethod,
+            DiscoveryYear = dto.DiscoveryYear.HasValue ? (int)dto.DiscoveryYear.Value : null,
+            DiscoveryFacility = dto.DiscoveryFacility,
+            DiscoveryTelescope = dto.DiscoveryTelescope,
+            DiscoveryInstrument = dto.DiscoveryInstrument,
+
+            OrbitalPeriodDays = dto.OrbitalPeriodDays,
+            SemiMajorAxisAu = dto.SemiMajorAxisAu,
+            Eccentricity = dto.Eccentricity,
+            InclinationDeg = dto.InclinationDeg,
+
+            MassEarth = dto.MassEarth,
+            MassEarthBest = dto.MassEarthBest,
+            MassJupiter = dto.MassJupiter,
+            MassProvenance = dto.MassProvenance,
+            MsiniEarth = dto.MsiniEarth,
+            RadiusEarth = dto.RadiusEarth,
+            RadiusJupiter = dto.RadiusJupiter,
+            DensityGramPerCm3 = dto.DensityGramPerCm3,
+
+            EquilibriumTemperatureK = dto.EquilibriumTemperatureK,
+            InsolationFlux = dto.InsolationFlux,
+
+            SpectralType = dto.SpectralType,
+            StellarEffectiveTemperatureK = dto.StellarEffectiveTemperatureK,
+            StellarRadiusSolar = dto.StellarRadiusSolar,
+            StellarMassSolar = dto.StellarMassSolar,
+            StellarLuminosityLogSolar = dto.StellarLuminosityLogSolar,
+            StellarSurfaceGravity = dto.StellarSurfaceGravity,
+            StellarMetallicity = dto.StellarMetallicity,
+            StellarAgeGyr = dto.StellarAgeGyr,
+
+            DistanceParsecs = dto.DistanceParsecs,
+
+            SolutionType = dto.SolutionType,
+            IsControversial = dto.ControversialFlag.HasValue ? dto.ControversialFlag.Value > 0.5 : null,
+            ReferenceName = dto.ReferenceName
+        };
     }
 }

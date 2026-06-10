@@ -182,7 +182,7 @@ public class ArxivHarvesterJob : IJob
                     AuthorIds = authorIds,
                     ExoplanetIds = new List<string>(), // will be populated by future NLP pipeline
                     HasEmbeddings = false,  // CRITICAL: reset on every upsert — triggers re-vectorization
-                    Vector = Array.Empty<float>(),
+                    ChunkCount = 0,
                     IsReviewed = false
                 };
 

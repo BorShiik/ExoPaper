@@ -98,15 +98,26 @@ const GAS_RIM = /* glsl */ `
   }
 `;
 
-export function createGasGiantMaterial(seed: number): GasGiantHandle {
+export function createGasGiantMaterial(seed: number, eqTempK?: number | null): GasGiantHandle {
   const rand = mulberry32(seed || 1);
   const hue = rand();
 
-  // Warm Jovian palette by default, hue-shifted per seed for variety.
-  const colorA = new THREE.Color().setHSL((0.06 + hue * 0.12) % 1, 0.55, 0.40); // deep belt
-  const colorB = new THREE.Color().setHSL((0.10 + hue * 0.10) % 1, 0.45, 0.74); // bright zone
-  const colorC = new THREE.Color().setHSL((0.55 + hue * 0.25) % 1, 0.55, 0.62); // atmosphere rim
-  const storm = new THREE.Color().setHSL((0.02 + hue * 0.06) % 1, 0.70, 0.48); // great spot
+  // Base hue shifts with equilibrium temperature so giants read physically:
+  // hot-Jupiter (reddish-brown) → temperate Jovian (tan) → cold ice giant (cyan).
+  let beltH = 0.06, zoneH = 0.10, rimH = 0.55, stormH = 0.02, sat = 0.55;
+  if (eqTempK != null) {
+    if (eqTempK >= 1000) {
+      beltH = 0.015; zoneH = 0.05; rimH = 0.06; stormH = 0.0; sat = 0.7; // molten reddish
+    } else if (eqTempK <= 150) {
+      beltH = 0.55; zoneH = 0.52; rimH = 0.5; stormH = 0.58; sat = 0.5; // neptune cyan-blue
+    }
+  }
+
+  // Hue-jittered per seed for variety within the temperature class.
+  const colorA = new THREE.Color().setHSL((beltH + hue * 0.06) % 1, sat, 0.40); // deep belt
+  const colorB = new THREE.Color().setHSL((zoneH + hue * 0.06) % 1, sat * 0.85, 0.74); // bright zone
+  const colorC = new THREE.Color().setHSL((rimH + hue * 0.1) % 1, 0.55, 0.62); // atmosphere rim
+  const storm = new THREE.Color().setHSL((stormH + hue * 0.05) % 1, 0.70, 0.48); // great spot
 
   const uniforms = {
     uTime: { value: 0 },

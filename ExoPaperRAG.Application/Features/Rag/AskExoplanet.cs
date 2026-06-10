@@ -11,7 +11,7 @@ using ExoPaperRAG.Application.Indexes;
 namespace ExoPaperRAG.Application.Features.Rag;
 
 /// <summary>
-/// Conversational RAG: retrieves the most relevant papers (vector search) for the
+/// Conversational RAG: retrieves the most relevant paper chunks (vector search) for the
 /// question, optionally grounds them in a focused planet, and streams an LLM answer
 /// token-by-token with inline citations. Implemented as a MediatR stream request so
 /// the API/SignalR layer stays transport-only.
@@ -72,26 +72,14 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
             planet = await session.LoadAsync<Exoplanet>(planetDocId, cancellationToken);
         }
 
-        // When a planet is in focus, scope the vector search to papers actually linked
-        // to it (Paper.ExoplanetIds). Otherwise a pure global similarity search returns
-        // the corpus-wide nearest neighbours to a generic question (e.g. "What is this
-        // planet?"), which are unrelated transit-survey papers — exactly the noise the
-        // "Related publications" panel avoids by filtering on the hard links.
-        var papers = await VectorSearchAsync(session, queryVector, planetDocId, take, cancellationToken);
+        var chunks = await VectorSearchAsync(session, queryVector, planetDocId, take, cancellationToken);
 
         // Fallback: the planet has no embedded+linked papers yet. Rather than answering
         // from corpus-wide noise, retry unscoped only when no planet was in focus.
-        if (papers.Count == 0 && planetDocId is null)
-            papers = await VectorSearchAsync(session, queryVector, null, take, cancellationToken);
+        if (chunks.Count == 0 && planetDocId is null)
+            chunks = await VectorSearchAsync(session, queryVector, null, take, cancellationToken);
 
-        // 1) Emit the sources used for grounding.
-        yield return new AskChunk
-        {
-            Type = "sources",
-            Sources = papers.Select(p => new AskSource { PaperId = p.Id, Title = p.Title }).ToList()
-        };
-
-        if (papers.Count == 0)
+        if (chunks.Count == 0)
         {
             yield return new AskChunk
             {
@@ -106,9 +94,24 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
             yield break;
         }
 
-        // 2) Build a grounded prompt.
-        var context = string.Join("\n\n", papers.Select((p, i) =>
-            $"[{i + 1}] {p.Title}\n{Truncate(p.Abstract, 800)}"));
+        // Load parent papers for titles
+        var paperIds = chunks.Select(c => c.PaperId).Distinct().ToList();
+        var papers = await session.LoadAsync<Paper>(paperIds, cancellationToken);
+
+        // 1) Emit the sources used for grounding.
+        yield return new AskChunk
+        {
+            Type = "sources",
+            Sources = papers.Values.Where(p => p != null).Select(p => new AskSource { PaperId = p.Id, Title = p.Title }).ToList()
+        };
+
+        // 2) Build a grounded prompt from chunk text instead of just abstracts
+        var context = string.Join("\n\n", chunks.Select((c, i) =>
+        {
+            var p = papers.TryGetValue(c.PaperId, out var paper) ? paper : null;
+            var title = p?.Title ?? "Unknown Source";
+            return $"[{i + 1}] {title} (Chunk {c.ChunkIndex})\n{Truncate(c.Text, 1200)}";
+        }));
 
         var planetBlock = planet is null
             ? string.Empty
@@ -132,16 +135,16 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
 
     /// <summary>
     /// Vector similarity search over <c>Papers/ByVector</c>, optionally constrained to a
-    /// single planet via the indexed <see cref="Paper.ExoplanetIds"/> field.
+    /// single planet via the indexed ExoplanetIds field.
     /// </summary>
-    private static async Task<List<Paper>> VectorSearchAsync(
+    private static async Task<List<Papers_ByVector.Result>> VectorSearchAsync(
         IAsyncDocumentSession session,
         float[] queryVector,
         string? planetDocId,
         int take,
         CancellationToken ct)
     {
-        var queryable = session.Query<Paper, Papers_ByVector>();
+        var queryable = session.Query<Papers_ByVector.Result, Papers_ByVector>();
 
         // AND the planet filter with the vector search so only linked papers are ranked.
         if (!string.IsNullOrWhiteSpace(planetDocId))
@@ -152,6 +155,7 @@ public class AskExoplanetQueryHandler : IStreamRequestHandler<AskExoplanetQuery,
                 indexField => indexField.WithField(x => x.Vector),
                 factory => factory.ByEmbedding(queryVector))
             .Take(take)
+            .ProjectInto<Papers_ByVector.Result>()
             .ToListAsync(ct);
     }
 

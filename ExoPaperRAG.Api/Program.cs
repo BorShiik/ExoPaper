@@ -88,8 +88,18 @@ namespace ExoPaperRAG.Api
                 })
                 .AddPolicyHandler(GetArxivRetryPolicy());
 
-            builder.Services.AddHttpClient<IOllamaClient, OllamaClient>()
+            builder.Services.AddHttpClient<IOllamaClient, OllamaClient>((sp, client) =>
+                {
+                    var settings = sp.GetRequiredService<IOptions<OllamaSettings>>().Value;
+                    client.Timeout = TimeSpan.FromMinutes(settings.GenerationTimeoutMinutes);
+                })
                 .AddPolicyHandler(GetRetryPolicy());
+
+            // Per-publication measurement source (NASA "ps" table) for uncertainty tracking.
+            builder.Services.AddScoped<IExoplanetMeasurementSource, NasaMeasurementSource>();
+
+            // On-demand per-planet arXiv harvesting.
+            builder.Services.AddScoped<ITargetedPaperHarvester, TargetedArxivHarvester>();
 
             // ─── Real-time (SignalR) ──────────────────────────────────────
             builder.Services.AddSignalR();
@@ -108,6 +118,7 @@ namespace ExoPaperRAG.Api
 
             // ─── Hosted services — RavenInitializer MUST be first ─────────
             builder.Services.AddHostedService<RavenInitializer>();
+            builder.Services.AddHostedService<OllamaWarmupService>();
             builder.Services.AddHostedService<EmbeddingWorker>();
             builder.Services.AddHostedService<TaggingWorker>();
             builder.Services.AddHostedService<PaperLinkingWorker>();
@@ -137,6 +148,14 @@ namespace ExoPaperRAG.Api
                     .WithIdentity("ArxivHarvesterTrigger")
                     .WithCronSchedule("0 0 3 * * ?")
                     .WithDescription("Daily arXiv paper harvesting"));
+
+                var targetedJobKey = new JobKey("TargetedHarvesterJob");
+                q.AddJob<TargetedHarvesterJob>(opts => opts.WithIdentity(targetedJobKey));
+                q.AddTrigger(opts => opts
+                    .ForJob(targetedJobKey)
+                    .WithIdentity("TargetedHarvesterTrigger")
+                    .WithSimpleSchedule(x => x.WithIntervalInMinutes(1).RepeatForever())
+                    .WithDescription("Continuous targeted arXiv harvesting"));
             });
 
             builder.Services.AddQuartzHostedService(opts => opts.WaitForJobsToComplete = true);

@@ -6,9 +6,17 @@ public class ArxivSettings
 {
     public const string SectionName = "ArxivSettings";
 
-    /// <summary>OAI-PMH base URL for arXiv.</summary>
+    /// <summary>OAI-PMH base URL for arXiv (bulk date-range harvest).</summary>
     [Required(AllowEmptyStrings = false)]
     public string BaseUrl { get; set; } = "http://export.arxiv.org/oai2";
+
+    /// <summary>arXiv Search API base URL (targeted keyword/name search for a single planet).</summary>
+    [Required(AllowEmptyStrings = false)]
+    public string SearchBaseUrl { get; set; } = "http://export.arxiv.org/api/query";
+
+    /// <summary>Max results returned by a targeted per-planet search.</summary>
+    [Range(1, 100)]
+    public int TargetedMaxResults { get; set; } = 15;
 
     /// <summary>OAI-PMH set to harvest (astro-ph.EP = exoplanet papers).</summary>
     [Required(AllowEmptyStrings = false)]

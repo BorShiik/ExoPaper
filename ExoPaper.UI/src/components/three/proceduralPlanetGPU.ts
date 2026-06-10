@@ -140,7 +140,7 @@ const PLANET_FRAG = /* glsl */ `
       if (uGaseous) {
         rr = (150.0 + (h - 0.5) * 40.0) / 255.0;
       } else if (h < 0.42) {
-        rr = 45.0 / 255.0; // ocean
+        rr = 20.0 / 255.0; // ocean — very smooth → tight, bright specular sun-glint
       } else if (polar > 0.3) {
         rr = 95.0 / 255.0; // ice
       } else {
@@ -156,6 +156,13 @@ const PLANET_FRAG = /* glsl */ `
       float c = fbm(seedPos * 3.5 + flow, 5);
       c = smoothstep(0.35, 0.65, c);
       gl_FragColor = vec4(vec3(1.0), c);
+    } else if (uMode == 4) {
+      // Emissive molten map (lava worlds): glowing cracks in the cooled crust.
+      float crack = smoothstep(0.52, 0.18, h); // low areas glow hottest
+      float veins = ridged((getCartesian(vUv) + uSeedOffset) * 6.0, 3);
+      float glowAmt = clamp(crack + (veins - 0.5) * 0.4, 0.0, 1.0);
+      vec3 glow = mix(vec3(0.45, 0.04, 0.0), vec3(1.0, 0.72, 0.18), glowAmt);
+      gl_FragColor = vec4(glow * glowAmt, 1.0);
     }
   }
 `;
@@ -192,6 +199,8 @@ export interface PlanetTexturesGPU {
   map: THREE.Texture;
   normalMap: THREE.Texture;
   roughnessMap: THREE.Texture;
+  /** Molten-glow map for lava worlds (null otherwise). */
+  emissiveMap: THREE.Texture | null;
   dispose: () => void;
 }
 
@@ -205,18 +214,29 @@ function mulberry32(seed: number) {
   };
 }
 
-export function generatePlanetTexturesGPU(
+/** Raw render-target set + its real GPU disposer (owned by the cache). */
+interface RawTextures {
+  map: THREE.Texture;
+  normalMap: THREE.Texture;
+  roughnessMap: THREE.Texture;
+  emissiveMap: THREE.Texture | null;
+  disposeRaw: () => void;
+}
+
+function generateRaw(
   gl: THREE.WebGLRenderer,
   seed: number,
   gaseous: boolean,
-  resolution: number = 1024
-): PlanetTexturesGPU {
+  resolution: number,
+  eqTempK: number | null | undefined,
+  lava: boolean
+): RawTextures {
   initFBO();
 
   const width = resolution;
   const height = resolution / 2;
 
-  const palette = pickPalette(seed, gaseous);
+  const palette = pickPalette(seed, gaseous, eqTempK);
   const toCol = (rgb: [number, number, number]) =>
     new THREE.Color(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
 
@@ -234,8 +254,8 @@ export function generatePlanetTexturesGPU(
   _mesh.material.uniforms.uColorMid.value = toCol(palette.mid);
   _mesh.material.uniforms.uColorHigh.value = toCol(palette.high);
 
-  const createTarget = (colorSpace: THREE.ColorSpace) => {
-    const rt = new THREE.WebGLRenderTarget(width, height, {
+  const createTarget = (colorSpace: THREE.ColorSpace) =>
+    new THREE.WebGLRenderTarget(width, height, {
       wrapS: THREE.RepeatWrapping,
       wrapT: THREE.ClampToEdgeWrapping,
       minFilter: THREE.LinearMipmapLinearFilter,
@@ -244,29 +264,24 @@ export function generatePlanetTexturesGPU(
       generateMipmaps: true,
       colorSpace,
     });
-    return rt;
-  };
 
   const rtMap = createTarget(THREE.SRGBColorSpace);
   const rtNormal = createTarget(THREE.NoColorSpace);
   const rtRough = createTarget(THREE.NoColorSpace);
+  const rtEmissive = lava ? createTarget(THREE.SRGBColorSpace) : null;
 
   const originalTarget = gl.getRenderTarget();
 
-  // Render Albedo
-  _mesh.material.uniforms.uMode.value = 0;
-  gl.setRenderTarget(rtMap);
-  gl.render(_scene, _camera);
+  const renderMode = (mode: number, rt: THREE.WebGLRenderTarget) => {
+    _mesh.material.uniforms.uMode.value = mode;
+    gl.setRenderTarget(rt);
+    gl.render(_scene, _camera);
+  };
 
-  // Render Normal
-  _mesh.material.uniforms.uMode.value = 1;
-  gl.setRenderTarget(rtNormal);
-  gl.render(_scene, _camera);
-
-  // Render Roughness
-  _mesh.material.uniforms.uMode.value = 2;
-  gl.setRenderTarget(rtRough);
-  gl.render(_scene, _camera);
+  renderMode(0, rtMap);
+  renderMode(1, rtNormal);
+  renderMode(2, rtRough);
+  if (rtEmissive) renderMode(4, rtEmissive);
 
   gl.setRenderTarget(originalTarget);
 
@@ -274,10 +289,81 @@ export function generatePlanetTexturesGPU(
     map: rtMap.texture,
     normalMap: rtNormal.texture,
     roughnessMap: rtRough.texture,
-    dispose: () => {
+    emissiveMap: rtEmissive ? rtEmissive.texture : null,
+    disposeRaw: () => {
       rtMap.dispose();
       rtNormal.dispose();
       rtRough.dispose();
+      rtEmissive?.dispose();
+    },
+  };
+}
+
+// ── Ref-counted LRU cache ─────────────────────────────────────────────────
+// The FBO render (3–4 full-screen shader passes, expensive normal map) is the
+// main source of navigation hitching. We cache the generated targets by their
+// generative key and only re-render on a real miss. Entries are never disposed
+// while still in use (refs > 0); idle entries are evicted once over capacity.
+interface CacheEntry {
+  raw: RawTextures;
+  refs: number;
+  lastUsed: number;
+}
+const _cache = new Map<string, CacheEntry>();
+const CACHE_CAPACITY = 10;
+let _clock = 0;
+
+function evictIfNeeded() {
+  while (_cache.size > CACHE_CAPACITY) {
+    let oldestKey: string | null = null;
+    let oldest = Infinity;
+    for (const [k, e] of _cache) {
+      if (e.refs === 0 && e.lastUsed < oldest) {
+        oldest = e.lastUsed;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey === null) break; // everything still in use
+    _cache.get(oldestKey)!.raw.disposeRaw();
+    _cache.delete(oldestKey);
+  }
+}
+
+export function generatePlanetTexturesGPU(
+  gl: THREE.WebGLRenderer,
+  seed: number,
+  gaseous: boolean,
+  resolution: number = 1024,
+  eqTempK?: number | null,
+  lava: boolean = false
+): PlanetTexturesGPU {
+  const tempBucket = eqTempK == null ? "x" : Math.round(eqTempK / 100);
+  const key = `${seed}|${gaseous ? 1 : 0}|${resolution}|${lava ? 1 : 0}|${tempBucket}`;
+
+  let entry = _cache.get(key);
+  if (!entry) {
+    entry = { raw: generateRaw(gl, seed, gaseous, resolution, eqTempK, lava), refs: 0, lastUsed: _clock };
+    _cache.set(key, entry);
+  }
+  entry.refs++;
+  entry.lastUsed = ++_clock;
+  evictIfNeeded();
+
+  let released = false;
+  return {
+    map: entry.raw.map,
+    normalMap: entry.raw.normalMap,
+    roughnessMap: entry.raw.roughnessMap,
+    emissiveMap: entry.raw.emissiveMap,
+    // Release this acquisition; GPU memory is freed later by LRU eviction.
+    dispose: () => {
+      if (released) return;
+      released = true;
+      const e = _cache.get(key);
+      if (e) {
+        e.refs = Math.max(0, e.refs - 1);
+        e.lastUsed = ++_clock;
+      }
     },
   };
 }

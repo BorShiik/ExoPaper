@@ -21,6 +21,11 @@ public record UncertaintySummaryResult
     public string ExoplanetId { get; init; } = string.Empty;
     public string ExoplanetName { get; init; } = string.Empty;
     public string AnalysisSummary { get; init; } = string.Empty;
+
+    /// <summary>Data-driven per-parameter discrepancy analysis from published measurements (NASA "ps").</summary>
+    public List<ParameterDisparity> Disparities { get; init; } = new();
+
+    /// <summary>Secondary signal: papers that reference the planet (literature context).</summary>
     public List<ConflictingMeasurement> Conflicts { get; init; } = new();
 }
 

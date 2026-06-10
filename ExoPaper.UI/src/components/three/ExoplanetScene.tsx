@@ -1,8 +1,6 @@
-import React, { Suspense, useMemo } from "react";
+import React, { Suspense, lazy, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Stars } from "@react-three/drei";
-import { EffectComposer, Bloom, Vignette, ToneMapping, SMAA } from "@react-three/postprocessing";
-import { ToneMappingMode } from "postprocessing";
+import { OrbitControls, Stars, AdaptiveDpr, PerformanceMonitor } from "@react-three/drei";
 import * as THREE from "three";
 import type { Exoplanet } from "../../types";
 import StarMesh from "./StarMesh";
@@ -10,6 +8,10 @@ import PlanetMesh from "./PlanetMesh";
 import DustDisk from "./DustDisk";
 import CanvasErrorBoundary from "../common/CanvasErrorBoundary";
 import { hashStringToSeed } from "./stellar";
+import { useAppStore } from "../../stores/appStore";
+import { usePageVisible } from "../../lib/usePageVisible";
+
+const ScenePostFX = lazy(() => import("./ScenePostFX"));
 
 interface Props {
   planet: Exoplanet;
@@ -53,20 +55,28 @@ const ExoplanetScene = React.memo(function ExoplanetScene({ planet }: Props) {
     planet.discoveryMethod === "Microlensing" ||
     (planet.semiMajorAxisAu != null && planet.semiMajorAxisAu >= 0.4 && planet.semiMajorAxisAu <= 3.0);
 
+  const graphicsQuality = useAppStore((s) => s.graphicsQuality);
+  const visible = usePageVisible();
+  const highFx = graphicsQuality === "high";
+
   return (
-    <div className="h-full w-full overflow-hidden">
+    <div className="h-full w-full overflow-hidden" aria-hidden="true">
       <CanvasErrorBoundary>
         <Canvas
-          shadows
+          shadows={highFx}
+          frameloop={visible ? "always" : "never"}
           camera={{ position: cameraPos, fov: 45 }}
           gl={{
-            antialias: true,
+            antialias: highFx,
             alpha: true,
             powerPreference: "high-performance",
             toneMapping: THREE.NoToneMapping,
           }}
-          dpr={[1, 1.5]}
+          dpr={[1, highFx ? 2 : 1.25]}
         >
+          {/* Auto-scale resolution down on sustained low frame-rates, restore when it recovers. */}
+          <PerformanceMonitor />
+          <AdaptiveDpr pixelated />
           <color attach="background" args={["#05070f"]} />
 
           <Suspense fallback={null}>
@@ -96,6 +106,7 @@ const ExoplanetScene = React.memo(function ExoplanetScene({ planet }: Props) {
               orbit={false}
               position={[0, 0, 0]}
               starPosition={starPos}
+              equilibriumTemperatureK={planet.equilibriumTemperatureK}
             />
 
             {/* Debris/dust disk around the planet — tilted for depth; the planet
@@ -116,13 +127,14 @@ const ExoplanetScene = React.memo(function ExoplanetScene({ planet }: Props) {
               target={[0, 0, 0]}
             />
 
-            <EffectComposer multisampling={0}>
-              <SMAA />
-              {/* Threshold ~1.0 → only the (HDR) star and bright rims bloom. */}
-              <Bloom luminanceThreshold={1.0} intensity={0.85} mipmapBlur radius={0.85} />
-              <Vignette eskil={false} offset={0.15} darkness={0.9} />
-              <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-            </EffectComposer>
+            <ScenePostFX
+              smaa={highFx}
+              bloomThreshold={1.0}
+              bloomIntensity={0.85}
+              bloomRadius={0.85}
+              vignetteOffset={0.15}
+              vignetteDarkness={0.9}
+            />
           </Suspense>
         </Canvas>
       </CanvasErrorBoundary>

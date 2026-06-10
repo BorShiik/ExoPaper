@@ -10,6 +10,11 @@ export default defineConfig({
   ],
   server: {
     proxy: {
+      '/api/translate': {
+        target: 'http://localhost:5500',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/api\/translate/, '/translate'),
+      },
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,

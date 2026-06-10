@@ -17,13 +17,12 @@ public class Paper
     public bool HasEmbeddings { get; set; }
 
     /// <summary>
-    /// Semantic embedding of the paper. Persisted in RavenDB (Corax vector index)
-    /// but never serialized to API responses — it is large and internal.
-    /// RavenDB uses its own (Newtonsoft) serializer, so this STJ attribute only
-    /// affects ASP.NET Core responses, not storage.
+    /// Number of embedding chunks stored for this paper. Chunks themselves live in separate
+    /// <see cref="PaperChunk"/> documents ("PaperChunks/{arxivId}/{index}") so the Paper document
+    /// stays small — storing hundreds of 768-dim vectors inline made documents exceed RavenDB's
+    /// 5 MB threshold and caused slow writes.
     /// </summary>
-    [JsonIgnore]
-    public float[] Vector { get; set; } = Array.Empty<float>();
+    public int ChunkCount { get; set; }
 
     public bool IsReviewed { get; set; }
 
@@ -60,15 +59,35 @@ public class Paper
             AuthorIds = authorIds,
             ExoplanetIds = new List<string>(),
             HasEmbeddings = false,
-            Vector = Array.Empty<float>(),
+            ChunkCount = 0,
             IsReviewed = false
         };
     }
 
-    /// <summary>Stores a freshly computed embedding and marks the paper as embedded.</summary>
-    public void SetEmbedding(float[] embedding)
+    /// <summary>Records how many chunk documents were stored and marks the paper embedded.</summary>
+    public void SetEmbedded(int chunkCount)
     {
-        Vector = embedding ?? Array.Empty<float>();
-        HasEmbeddings = Vector.Length > 0;
+        ChunkCount = chunkCount;
+        HasEmbeddings = chunkCount > 0;
     }
+
+    /// <summary>Deterministic chunk-document id for a given paper + chunk index.</summary>
+    public static string ChunkId(string paperId, int index)
+    {
+        var arxivId = paperId.Replace("papers/", string.Empty);
+        return $"PaperChunks/{arxivId}/{index}";
+    }
+}
+
+/// <summary>
+/// A single embedded text chunk of a paper, stored as its own document so the parent Paper
+/// document stays small. Indexed for Corax vector search by <c>Papers_ByVector</c>.
+/// </summary>
+public class PaperChunk
+{
+    public string Id { get; set; } = string.Empty;       // PaperChunks/{arxivId}/{index}
+    public string PaperId { get; set; } = string.Empty;  // papers/{arxivId}
+    public int Index { get; set; }
+    public string Text { get; set; } = string.Empty;
+    public float[] Vector { get; set; } = Array.Empty<float>();
 }

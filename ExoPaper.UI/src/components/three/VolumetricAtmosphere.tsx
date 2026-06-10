@@ -30,32 +30,37 @@ const FRAG = /* glsl */ `
     vec3 N = normalize(vNormalW);
     vec3 V = normalize(cameraPosition - vPositionW);
     vec3 L = normalize(uStarPos - vPositionW);
-    
+
     float NdotV = max(0.0, dot(N, V));
-    float NdotL = max(0.0, dot(N, L));
+    float NdotL = dot(N, L);
     float VdotL = max(0.0, dot(V, L));
-    
-    // Optical depth through the edge of the sphere
-    float opticalDepth = exp(-pow(1.0 - NdotV, 3.5) * 5.0);
-    
-    // Rayleigh phase function
-    float rayleighPhase = 0.75 * (1.0 + VdotL * VdotL);
-    
-    // Sunset terminator (red/orange shift when light grazes the horizon)
-    float terminator = exp(-NdotL * 6.0) * smoothstep(-0.2, 0.2, NdotL);
-    vec3 sunsetColor = mix(uColor, vec3(1.0, 0.3, 0.05), terminator);
-    
-    vec3 scatter = sunsetColor * opticalDepth * rayleighPhase * NdotL * 1.5;
-    
-    // Additive rim glow for the outer halo
-    float rim = pow(1.0 - NdotV, 4.0) * smoothstep(-0.1, 0.5, NdotL);
-    scatter += sunsetColor * rim * 2.0;
-    
-    // Night side ambient
-    scatter += uColor * 0.02 * (1.0 - NdotV);
-    
-    float alpha = clamp(max(scatter.r, max(scatter.g, scatter.b)), 0.0, 1.0);
-    gl_FragColor = vec4(scatter, alpha);
+
+    // Limb-only halo: 0 over the disc (planet shows through), peaks at the silhouette.
+    // This is the key to avoiding the "soap-bubble" look over the planet's face.
+    float limb = pow(1.0 - NdotV, 3.5);
+
+    // Day-lit gating with a soft terminator falloff.
+    float dayLight = smoothstep(-0.35, 0.35, NdotL);
+
+    // Wavelength-dependent Rayleigh tint, blended with the planet's climate colour.
+    vec3 betaRayleigh = vec3(0.25, 0.5, 1.0);
+    vec3 dayTint = mix(uColor, betaRayleigh, 0.4);
+
+    // Reddening where the light grazes the horizon (sunset band near the terminator).
+    float terminator = smoothstep(0.0, 0.4, NdotL) * smoothstep(0.75, 0.0, NdotL);
+    vec3 col = mix(dayTint, vec3(1.0, 0.4, 0.12), terminator * 0.55);
+
+    // Mie forward-scattering crescent toward the star, only at the limb.
+    const float g = 0.74;
+    float miePhase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * VdotL, 1.5);
+
+    float intensity =
+        limb * dayLight * 1.3            // main lit halo
+      + limb * miePhase * 0.04 * dayLight // forward Mie crescent
+      + limb * 0.05;                      // faint night-side limb
+
+    intensity = clamp(intensity, 0.0, 1.0);
+    gl_FragColor = vec4(col * intensity, intensity);
   }
 `;
 

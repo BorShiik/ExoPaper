@@ -17,8 +17,9 @@ import {
 import Header from "../components/layout/Header";
 import { searchPapers, getPaperWithAuthors } from "../api/papers";
 import type { Paper, PaperWithAuthors } from "../types";
-import { shortId } from "../lib/utils";
+import { shortId, arxivUrl } from "../lib/utils";
 import { useT } from "../i18n/LanguageContext";
+import MarkdownText from "../components/ui/MarkdownText";
 
 const SUGGESTIONS = [
   "atmospheric biosignatures",
@@ -277,14 +278,32 @@ export default function PapersPage() {
                   )}
                 </div>
 
-                <p className="mt-2.5 line-clamp-3 text-xs leading-relaxed text-[#9aa7bd]">
-                  {paper.abstract}
-                </p>
+                <div className="mt-2.5 line-clamp-3 text-xs leading-relaxed text-[#9aa7bd] font-medium">
+                  <MarkdownText text={paper.abstract} />
+                </div>
 
-                <span className="mt-3 inline-flex items-center gap-1 text-[10px] font-medium text-[#81A1C1] opacity-0 transition-opacity group-hover:opacity-100">
-                  {t("papers.detailsKicker")}
-                  <ArrowUpRight className="h-3 w-3" />
-                </span>
+                <div className="mt-4 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#81A1C1] opacity-0 transition-opacity group-hover:opacity-100">
+                    {t("papers.detailsKicker")}
+                    <ArrowUpRight className="h-3 w-3" />
+                  </span>
+                  <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); window.open(arxivUrl(paper.id), '_blank'); }}
+                      className="rounded p-1 text-[#7a869c] hover:bg-white/10 hover:text-[#ECEFF4] transition-colors"
+                      title="Read HTML"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); window.open(`https://arxiv.org/pdf/${paper.id.replace('papers/', '')}.pdf`, '_blank'); }}
+                      className="rounded p-1 text-[#7a869c] hover:bg-[#BF616A]/20 hover:text-[#BF616A] transition-colors"
+                      title="Download PDF"
+                    >
+                      <FileText className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
               </motion.button>
             ))}
           </AnimatePresence>
@@ -388,9 +407,9 @@ export default function PapersPage() {
                   <div className="space-y-2">
                     <h3 className="text-xs font-semibold text-[#ECEFF4]">{t("papers.abstract")}</h3>
                     <div className="rounded-xl border border-white/[0.07] bg-[#070b14]/70 p-4">
-                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-[#9aa7bd]">
-                        {details.paper.abstract}
-                      </p>
+                      <div className="text-xs leading-relaxed text-[#9aa7bd] font-medium">
+                        <MarkdownText text={details.paper.abstract} />
+                      </div>
                     </div>
                   </div>
 
@@ -421,7 +440,27 @@ export default function PapersPage() {
                     </div>
                   )}
 
-                  <div className="flex justify-end pt-1">
+                  <div className="flex flex-wrap items-center justify-between pt-1 gap-4">
+                    <div className="flex gap-2">
+                      <a
+                        href={arxivUrl(details.paper.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#5E81AC] to-[#81A1C1] px-4 py-2 text-xs font-semibold text-white shadow-lg transition-all hover:shadow-[0_0_16px_-4px_rgba(129,161,193,0.7)]"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Read Article (HTML)
+                      </a>
+                      <a
+                        href={`https://arxiv.org/pdf/${details.paper.id.replace('papers/', '')}.pdf`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[#BF616A]/30 bg-[#BF616A]/10 px-4 py-2 text-xs font-semibold text-[#ECEFF4] transition-colors hover:bg-[#BF616A]/20"
+                      >
+                        <FileText className="h-3.5 w-3.5 text-[#BF616A]" />
+                        Download PDF
+                      </a>
+                    </div>
                     <button
                       type="button"
                       onClick={closeModal}

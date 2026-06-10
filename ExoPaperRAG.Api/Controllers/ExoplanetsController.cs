@@ -1,5 +1,6 @@
 using ExoPaperRAG.Application.Features.Exoplanets.Commands;
 using ExoPaperRAG.Application.Features.Exoplanets.Queries;
+using ExoPaperRAG.Application.Features.Planets.Commands;
 using ExoPaperRAG.Application.Features.Planets.Queries;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
@@ -77,4 +78,18 @@ public class ExoplanetsController : ControllerBase
         return Ok(await _mediator.Send(
             new GetUncertaintySummaryQuery { ExoplanetId = docId, Regenerate = regenerate }, ct));
     }
+
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetSummary(
+        [FromQuery] string id, [FromQuery] bool regenerate = false, CancellationToken ct = default)
+    {
+        var docId = id.StartsWith("exoplanets/", StringComparison.OrdinalIgnoreCase) ? id : $"exoplanets/{id}";
+        return Ok(await _mediator.Send(
+            new GetPlanetAiSummaryQuery { ExoplanetId = docId, Regenerate = regenerate }, ct));
+    }
+
+    /// <summary>On-demand: search arXiv for this planet and link any matching papers.</summary>
+    [HttpPost("harvest")]
+    public async Task<IActionResult> Harvest([FromQuery] string id, CancellationToken ct = default)
+        => Ok(await _mediator.Send(new HarvestPapersForPlanetCommand(id), ct));
 }

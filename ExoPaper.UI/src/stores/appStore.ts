@@ -4,6 +4,16 @@ import type { RealtimeEvent } from "../types";
 
 export type GraphicsQuality = "high" | "low";
 
+/** Picks a sensible default quality from device capability (mobiles / low-core CPUs → low). */
+function detectInitialQuality(): GraphicsQuality {
+  if (typeof navigator === "undefined") return "high";
+  const cores = navigator.hardwareConcurrency ?? 8;
+  const mobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  const lowMemory = (navigator as { deviceMemory?: number }).deviceMemory ?? 8;
+  if (mobile || cores <= 4 || lowMemory <= 4) return "low";
+  return "high";
+}
+
 interface AppState {
   // SignalR connection
   isConnected: boolean;
@@ -50,6 +60,6 @@ export const useAppStore = create<AppState>((set) => ({
   setMobileNavOpen: (v) => set({ mobileNavOpen: v }),
   toggleMobileNav: () => set((state) => ({ mobileNavOpen: !state.mobileNavOpen })),
 
-  graphicsQuality: "high",
+  graphicsQuality: detectInitialQuality(),
   setGraphicsQuality: (q) => set({ graphicsQuality: q }),
 }));

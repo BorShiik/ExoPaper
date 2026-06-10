@@ -15,7 +15,8 @@ export default function CloudMesh({ radius, seed }: Props) {
   const graphicsQuality = useAppStore((s) => s.graphicsQuality);
 
   const cloudTex = useMemo(
-    () => generateCloudTextureGPU(gl, seed, graphicsQuality === "high" ? 2048 : 512),
+    // Clouds are soft — 1024 is indistinguishable from 2048 here but halves memory/gen cost.
+    () => generateCloudTextureGPU(gl, seed, graphicsQuality === "high" ? 1024 : 512),
     [gl, seed, graphicsQuality]
   );
 

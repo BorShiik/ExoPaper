@@ -294,7 +294,60 @@ const GAS_PALETTES: { low: RGB; mid: RGB; high: RGB }[] = [
   { low: [48, 124, 124], mid: [120, 196, 190], high: [214, 244, 238] }, // uranus
 ];
 
-export function pickPalette(seed: number, gaseous: boolean) {
-  const table = gaseous ? GAS_PALETTES : ROCKY_PALETTES;
-  return table[seed % table.length];
+// ── Physics-driven archetype palettes ───────────────────────────────────────
+// Selected by equilibrium temperature so a planet's look matches its actual
+// climate; seed only varies *within* an archetype for uniqueness.
+const LAVA: RGB[][] = [
+  [[18, 12, 10], [120, 34, 14], [240, 130, 40]],   // basalt → molten orange
+  [[24, 10, 8], [150, 40, 20], [250, 90, 30]],     // darker, redder
+];
+const DESERT: RGB[][] = [
+  [[96, 56, 32], [176, 118, 70], [228, 198, 158]], // sandy
+  [[80, 44, 30], [160, 96, 56], [220, 176, 130]],  // ochre
+];
+const TERRAN: RGB[][] = [
+  [[18, 46, 86], [104, 86, 58], [212, 206, 192]],  // earth-like
+  [[22, 44, 36], [78, 116, 72], [206, 224, 188]],  // verdant
+];
+const OCEAN_COLD: RGB[][] = [
+  [[10, 30, 70], [40, 92, 140], [206, 224, 236]],  // deep ocean + ice
+  [[14, 38, 80], [54, 104, 150], [220, 234, 244]],
+];
+const ICE_WORLD: RGB[][] = [
+  [[120, 150, 182], [190, 210, 230], [240, 246, 252]], // frozen
+  [[100, 128, 160], [172, 196, 220], [232, 240, 250]],
+];
+const HOT_GAS: RGB[][] = [
+  [[70, 18, 10], [172, 84, 50], [242, 200, 150]],  // hot-jupiter reddish-brown
+  [[84, 30, 18], [196, 110, 64], [248, 214, 168]],
+];
+
+const pick = <T,>(table: T[], seed: number): T => table[seed % table.length];
+const toPal = (p: RGB[]) => ({ low: p[0], mid: p[1], high: p[2] });
+
+/**
+ * Chooses a colour palette from the planet's physics. Equilibrium temperature
+ * picks the climate archetype (lava / desert / temperate / ocean / ice for rocky
+ * worlds; hot / temperate / ice for giants); the seed varies looks within it.
+ * Falls back to the seed-only tables when no temperature is known.
+ */
+export function pickPalette(seed: number, gaseous: boolean, eqTempK?: number | null) {
+  if (gaseous) {
+    if (eqTempK != null) {
+      if (eqTempK >= 1000) return toPal(pick(HOT_GAS, seed));
+      if (eqTempK <= 150) return GAS_PALETTES[2 + (seed % 2)]; // neptune / uranus (cold)
+      return GAS_PALETTES[seed % 2]; // jupiter / saturn (temperate)
+    }
+    return GAS_PALETTES[seed % GAS_PALETTES.length];
+  }
+
+  if (eqTempK != null) {
+    if (eqTempK >= 1000) return toPal(pick(LAVA, seed));
+    if (eqTempK >= 330) return toPal(pick(DESERT, seed));
+    if (eqTempK >= 250) return toPal(pick(TERRAN, seed));
+    if (eqTempK >= 180) return toPal(pick(OCEAN_COLD, seed));
+    return toPal(pick(ICE_WORLD, seed));
+  }
+
+  return ROCKY_PALETTES[seed % ROCKY_PALETTES.length];
 }

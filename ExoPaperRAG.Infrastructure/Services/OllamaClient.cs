@@ -28,8 +28,15 @@ public class OllamaClient : IOllamaClient
         _logger = logger;
 
         _http.BaseAddress = new Uri(_settings.BaseUrl);
-        _http.Timeout = TimeSpan.FromMinutes(5); // LLM generation can be slow
+        _http.Timeout = TimeSpan.FromMinutes(_settings.GenerationTimeoutMinutes); // LLM generation can be slow
     }
+
+    private string KeepAlive => $"{_settings.KeepAliveMinutes}m";
+
+    private Dictionary<string, object>? GenerationOptions =>
+        _settings.MaxGenerationTokens > 0
+            ? new Dictionary<string, object> { ["num_predict"] = _settings.MaxGenerationTokens }
+            : null;
 
     /// <inheritdoc />
     public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken ct = default)
@@ -63,7 +70,9 @@ public class OllamaClient : IOllamaClient
             Model = _settings.GenerationModel,
             Prompt = prompt,
             System = systemPrompt,
-            Stream = false // get full response at once
+            Stream = false, // get full response at once
+            KeepAlive = KeepAlive,
+            Options = GenerationOptions
         };
 
         _logger.LogDebug("Requesting generation from Ollama ({Model}), prompt length: {Len}",
@@ -77,8 +86,39 @@ public class OllamaClient : IOllamaClient
         if (string.IsNullOrWhiteSpace(result?.Response))
             throw new InvalidOperationException("Ollama returned an empty generation response.");
 
-        _logger.LogDebug("Received generation response, length: {Len}", result.Response.Length);
+        LogTiming(result);
         return result.Response;
+    }
+
+    /// <inheritdoc />
+    public async Task WarmUpAsync(CancellationToken ct = default)
+    {
+        // Empty prompt with keep_alive loads the model into memory without generating text,
+        // so the first real synthesis doesn't pay the weight-load cost.
+        var request = new GenerateRequest
+        {
+            Model = _settings.GenerationModel,
+            Prompt = string.Empty,
+            Stream = false,
+            KeepAlive = KeepAlive
+        };
+
+        var response = await _http.PostAsJsonAsync("/api/generate", request, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+        _logger.LogInformation("Ollama generation model '{Model}' warmed up.", _settings.GenerationModel);
+    }
+
+    /// <summary>Logs token throughput so a CPU-bound (vs GPU) deployment is visible in the logs.</summary>
+    private void LogTiming(GenerateResponse? result)
+    {
+        if (result is null) return;
+        if (_logger.IsEnabled(LogLevel.Information) && result.EvalCount > 0 && result.EvalDuration > 0)
+        {
+            var tokensPerSecond = result.EvalCount / (result.EvalDuration / 1_000_000_000.0);
+            _logger.LogInformation(
+                "Ollama generation: {Tokens} tokens at {Rate:F1} tok/s.",
+                result.EvalCount, tokensPerSecond);
+        }
     }
 
     /// <inheritdoc />
@@ -90,7 +130,9 @@ public class OllamaClient : IOllamaClient
             Model = _settings.GenerationModel,
             Prompt = prompt,
             System = systemPrompt,
-            Stream = true
+            Stream = true,
+            KeepAlive = KeepAlive,
+            Options = GenerationOptions
         };
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/generate")
@@ -153,11 +195,22 @@ public class OllamaClient : IOllamaClient
         public string Prompt { get; set; } = default!;
         public string? System { get; set; }
         public bool Stream { get; set; }
+
+        [JsonPropertyName("keep_alive")]
+        public string? KeepAlive { get; set; }
+
+        public Dictionary<string, object>? Options { get; set; }
     }
 
     private sealed class GenerateResponse
     {
         public string Response { get; set; } = string.Empty;
         public bool Done { get; set; }
+
+        [JsonPropertyName("eval_count")]
+        public int EvalCount { get; set; }
+
+        [JsonPropertyName("eval_duration")]
+        public long EvalDuration { get; set; }
     }
 }

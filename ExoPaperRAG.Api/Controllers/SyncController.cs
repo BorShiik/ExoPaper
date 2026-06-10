@@ -22,6 +22,10 @@ public class SyncController : ControllerBase
     public async Task<IActionResult> GetStatus(CancellationToken ct)
         => Ok(await _mediator.Send(new GetSyncStatusQuery(), ct));
 
+    [HttpGet("health")]
+    public async Task<IActionResult> GetHealth(CancellationToken ct)
+        => Ok(await _mediator.Send(new GetSystemHealthQuery(), ct));
+
     [HttpPost("nasa")]
     public async Task<IActionResult> TriggerNasaSync()
     {

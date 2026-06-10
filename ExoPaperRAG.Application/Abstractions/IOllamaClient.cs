@@ -21,4 +21,10 @@ public interface IOllamaClient
     /// </summary>
     IAsyncEnumerable<string> GenerateStreamAsync(
         string prompt, string? systemPrompt = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Loads the generation model into memory ahead of time so the first real request
+    /// doesn't pay the model-load cost. Safe to call repeatedly.
+    /// </summary>
+    Task WarmUpAsync(CancellationToken ct = default);
 }

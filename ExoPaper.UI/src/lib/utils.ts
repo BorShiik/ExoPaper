@@ -60,6 +60,45 @@ export function starColorHex(tempK: number | null | undefined): number {
   return 0x88bbff;
 }
 
+// ── Unit conversions ─────────────────────────────────────────────────────
+const EARTH_MASSES_PER_JUPITER = 317.828;
+const EARTH_RADII_PER_JUPITER = 11.209;
+const LIGHT_YEARS_PER_PARSEC = 3.26156;
+
+export const toJupiterMass = (earthMass: number) => earthMass / EARTH_MASSES_PER_JUPITER;
+export const toJupiterRadius = (earthRadius: number) => earthRadius / EARTH_RADII_PER_JUPITER;
+export const parsecsToLightYears = (pc: number) => pc * LIGHT_YEARS_PER_PARSEC;
+export const kelvinToCelsius = (k: number) => k - 273.15;
+
+/** Compact number formatting (e.g. 5085.28 → "5,085", 0.0123 → "0.012"). */
+export function compactNumber(value: number, maxDecimals = 2): string {
+  const abs = Math.abs(value);
+  if (abs >= 1000) return Math.round(value).toLocaleString();
+  if (abs >= 1) return Number(value.toFixed(maxDecimals)).toLocaleString();
+  return Number(value.toFixed(maxDecimals + 1)).toString();
+}
+
+/** Classifies a planet by radius (preferred) or mass into a display type + color. */
+export function classifyPlanet(
+  massEarth?: number | null,
+  radiusEarth?: number | null
+): { key: TranslationKey; color: string } | null {
+  if (radiusEarth != null) {
+    if (radiusEarth < 1.25) return { key: "type.terrestrial", color: "#A3BE8C" };
+    if (radiusEarth < 2) return { key: "type.superEarth", color: "#8FBCBB" };
+    if (radiusEarth < 4) return { key: "type.subNeptune", color: "#88C0D0" };
+    if (radiusEarth < 6) return { key: "type.neptunelike", color: "#81A1C1" };
+    return { key: "type.gasGiant", color: "#EBCB8B" };
+  }
+  if (massEarth != null) {
+    if (massEarth < 2) return { key: "type.terrestrial", color: "#A3BE8C" };
+    if (massEarth < 10) return { key: "type.superEarth", color: "#8FBCBB" };
+    if (massEarth < 50) return { key: "type.neptunelike", color: "#81A1C1" };
+    return { key: "type.gasGiant", color: "#EBCB8B" };
+  }
+  return null;
+}
+
 /** arXiv preprints use the tail of the document id without the collection prefix. */
 export function extractArxivId(paperId: string): string {
   return paperId.replace(/^papers\//i, "");

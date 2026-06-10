@@ -6,28 +6,30 @@ using Raven.Client.Exceptions.Documents.Subscriptions;
 using ExoPaperRAG.Domain.Entities;
 using ExoPaperRAG.Application.Abstractions;
 using System.Text.Json;
+using HtmlAgilityPack;
+using System.Text.RegularExpressions;
 
 namespace ExoPaperRAG.Infrastructure.Workers;
 
 /// <summary>
-/// Consumes a RavenDB Data Subscription of papers without embeddings, vectorizes
-/// each via Ollama, stores the vector and an Outbox event. RavenDB delivers each
-/// document until the batch is acknowledged, and the
-/// <see cref="SubscriptionOpeningStrategy.WaitForFree"/> strategy ensures only one
-/// consumer is active across all API instances (no duplicate work when scaled out).
+/// Consumes a RavenDB Data Subscription of papers without embeddings, fetches the 
+/// full text HTML from arXiv (falling back to abstract), chunks the text,
+/// vectorizes each chunk via Ollama, and stores the chunks.
 /// </summary>
 public sealed class EmbeddingWorker : BackgroundService
 {
     private readonly IDocumentStore _store;
     private readonly IOllamaClient _ollama;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<EmbeddingWorker> _logger;
 
     private const string SubscriptionName = "papers-without-embeddings";
 
-    public EmbeddingWorker(IDocumentStore store, IOllamaClient ollama, ILogger<EmbeddingWorker> logger)
+    public EmbeddingWorker(IDocumentStore store, IOllamaClient ollama, IHttpClientFactory httpClientFactory, ILogger<EmbeddingWorker> logger)
     {
         _store = store;
         _ollama = ollama;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -70,13 +72,40 @@ public sealed class EmbeddingWorker : BackgroundService
             var paper = item.Result;
             try
             {
-                var textToEmbed = $"Title: {paper.Title}\nAbstract: {paper.Abstract}";
-                var embedding = await _ollama.GetEmbeddingAsync(textToEmbed);
+                string textToChunk = await GetPaperTextAsync(paper);
 
-                if (embedding is { Length: > 0 })
+                var chunks = ChunkText(textToChunk, 1000, 200).ToList();
+
+                // Remove any previously stored chunk documents (deterministic ids) so a re-embed
+                // doesn't leave orphans. Chunks are separate documents — the Paper stays small.
+                for (int i = 0; i < paper.ChunkCount; i++)
+                    session.Delete(Paper.ChunkId(paper.Id, i));
+
+                var stored = 0;
+                for (int i = 0; i < chunks.Count; i++)
                 {
-                    paper.SetEmbedding(embedding);
+                    var chunkText = chunks[i];
+                    var embedding = await _ollama.GetEmbeddingAsync(chunkText);
 
+                    if (embedding is { Length: > 0 })
+                    {
+                        var chunkId = Paper.ChunkId(paper.Id, stored);
+                        await session.StoreAsync(new PaperChunk
+                        {
+                            Id = chunkId,
+                            PaperId = paper.Id,
+                            Index = stored,
+                            Text = chunkText,
+                            Vector = embedding
+                        }, chunkId);
+                        stored++;
+                    }
+                }
+
+                paper.SetEmbedded(stored);
+
+                if (stored > 0)
+                {
                     var payload = JsonSerializer.Serialize(new { PaperId = paper.Id, paper.Title });
                     await session.StoreAsync(new OutboxEvent
                     {
@@ -84,7 +113,7 @@ public sealed class EmbeddingWorker : BackgroundService
                         PayloadJson = payload
                     });
 
-                    _logger.LogDebug("[EmbeddingWorker] Embedded paper '{Id}'.", paper.Id);
+                    _logger.LogInformation("[EmbeddingWorker] Embedded paper '{Id}' into {Count} chunk document(s).", paper.Id, stored);
                 }
             }
             catch (Exception ex)
@@ -95,6 +124,62 @@ public sealed class EmbeddingWorker : BackgroundService
         }
 
         await session.SaveChangesAsync();
+    }
+
+    private async Task<string> GetPaperTextAsync(Paper paper)
+    {
+        string arxivId = paper.Id.Replace("papers/", "");
+        // Try to fetch HTML
+        if (!string.IsNullOrWhiteSpace(arxivId))
+        {
+            try
+            {
+                // Delay to respect arXiv rate limits loosely
+                await Task.Delay(1000);
+                
+                using var http = _httpClientFactory.CreateClient();
+                // We use a short timeout so we don't stall the subscription worker if ar5iv is slow
+                http.Timeout = TimeSpan.FromSeconds(10);
+                
+                var url = $"https://arxiv.org/html/{arxivId}";
+                var response = await http.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    var html = await response.Content.ReadAsStringAsync();
+                    var doc = new HtmlDocument();
+                    doc.LoadHtml(html);
+                    
+                    var text = doc.DocumentNode.InnerText;
+                    text = Regex.Replace(text, @"\s+", " ").Trim();
+                    
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        _logger.LogInformation("[EmbeddingWorker] Downloaded HTML full text for {ArxivId}", arxivId);
+                        return $"Title: {paper.Title}\nContent: {text}";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[EmbeddingWorker] Failed to fetch HTML for {ArxivId}, falling back to abstract.", arxivId);
+            }
+        }
+
+        // Fallback to Abstract
+        return $"Title: {paper.Title}\nAbstract: {paper.Abstract}";
+    }
+
+    private static IEnumerable<string> ChunkText(string text, int maxChunkSize, int overlap)
+    {
+        if (string.IsNullOrWhiteSpace(text)) yield break;
+
+        int i = 0;
+        while (i < text.Length)
+        {
+            int length = Math.Min(maxChunkSize, text.Length - i);
+            yield return text.Substring(i, length);
+            i += maxChunkSize - overlap;
+        }
     }
 
     private async Task EnsureSubscriptionAsync(CancellationToken ct)

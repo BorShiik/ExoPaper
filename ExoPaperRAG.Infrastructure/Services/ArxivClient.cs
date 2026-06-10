@@ -39,6 +39,11 @@ public interface IArxivClient
     /// Fetches the next page using a resumption token.
     /// </summary>
     Task<ArxivHarvestPage> ListRecordsAsync(string resumptionToken, CancellationToken ct = default);
+
+    /// <summary>
+    /// Searches for records using the arXiv query API.
+    /// </summary>
+    Task<ArxivHarvestPage> SearchRecordsAsync(string query, int maxResults = 10, CancellationToken ct = default);
 }
 
 public class ArxivClient : IArxivClient
@@ -78,6 +83,25 @@ public class ArxivClient : IArxivClient
     {
         var url = $"{_settings.BaseUrl}?verb=ListRecords&resumptionToken={Uri.EscapeDataString(resumptionToken)}";
         return await FetchAndParseAsync(url, ct);
+    }
+
+    public async Task<ArxivHarvestPage> SearchRecordsAsync(string query, int maxResults = 10, CancellationToken ct = default)
+    {
+        var url = $"{_settings.SearchBaseUrl}?search_query={Uri.EscapeDataString(query)}&start=0&max_results={maxResults}";
+        
+        await _rateLimiter.WaitAsync(ct);
+        try
+        {
+            await Task.Delay(_settings.RequestDelayMs, ct);
+            _logger.LogInformation("[arXiv] Searching: {Url}", url);
+            var xml = await GetWithFlowControlAsync(url, ct);
+            var doc = XDocument.Parse(xml);
+            return ParseSearchRecords(doc);
+        }
+        finally
+        {
+            _rateLimiter.Release();
+        }
     }
 
     private async Task<ArxivHarvestPage> FetchAndParseAsync(string url, CancellationToken ct)
@@ -246,6 +270,65 @@ public class ArxivClient : IArxivClient
             result.Records.Count,
             result.ResumptionToken != null ? "present" : "none");
 
+        return result;
+    }
+
+    private static readonly XNamespace AtomNs = "http://www.w3.org/2005/Atom";
+
+    private ArxivHarvestPage ParseSearchRecords(XDocument doc)
+    {
+        var result = new ArxivHarvestPage();
+        
+        if (doc.Root == null || doc.Root.Name != AtomNs + "feed")
+        {
+            _logger.LogWarning("[arXiv] No Atom feed element found in search response.");
+            return result;
+        }
+
+        foreach (var entry in doc.Root.Elements(AtomNs + "entry"))
+        {
+            try
+            {
+                var idUrl = entry.Element(AtomNs + "id")?.Value?.Trim() ?? string.Empty;
+                var arxivId = idUrl.Split("/abs/").LastOrDefault()?.Split('v').FirstOrDefault() ?? string.Empty;
+
+                if (string.IsNullOrEmpty(arxivId)) continue;
+
+                var arxivRecord = new ArxivRecord
+                {
+                    ArxivId = arxivId,
+                    Title = CleanText(entry.Element(AtomNs + "title")?.Value),
+                    Abstract = CleanText(entry.Element(AtomNs + "summary")?.Value),
+                    Created = DateTime.TryParse(entry.Element(AtomNs + "published")?.Value, out var dt)
+                        ? dt
+                        : DateTime.MinValue,
+                };
+
+                // Parse authors
+                foreach (var author in entry.Elements(AtomNs + "author"))
+                {
+                    var name = author.Element(AtomNs + "name")?.Value?.Trim();
+                    if (!string.IsNullOrEmpty(name))
+                        arxivRecord.Authors.Add(name);
+                }
+
+                // Parse categories
+                foreach (var category in entry.Elements(AtomNs + "category"))
+                {
+                    var term = category.Attribute("term")?.Value?.Trim();
+                    if (!string.IsNullOrEmpty(term))
+                        arxivRecord.Categories.Add(term);
+                }
+
+                result.Records.Add(arxivRecord);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[arXiv] Failed to parse search entry, skipping.");
+            }
+        }
+
+        _logger.LogInformation("[arXiv] Parsed {Count} records from search.", result.Records.Count);
         return result;
     }
 

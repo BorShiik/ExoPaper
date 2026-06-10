@@ -54,15 +54,16 @@ public class SearchHybridQueryHandler : IRequestHandler<SearchHybridQuery, Searc
 
         // Step 3: Vector search on Papers_ByVector (Corax) index
         var vectorResults = await session
-            .Query<Paper, Papers_ByVector>()
+            .Query<Papers_ByVector.Result, Papers_ByVector>()
             .VectorSearch(
                 indexField => indexField.WithField(x => x.Vector),
                 factory => factory.ByEmbedding(queryVector))
             .Take(request.Take * 2) // fetch more to allow post-filtering
+            .ProjectInto<Papers_ByVector.Result>()
             .ToListAsync(ct);
 
         // Step 4: Post-filter by exoplanet IDs if hard filters were applied
-        IEnumerable<Paper> filtered = vectorResults;
+        IEnumerable<Papers_ByVector.Result> filtered = vectorResults;
 
         if (allowedExoplanetIds != null)
         {
@@ -70,7 +71,10 @@ public class SearchHybridQueryHandler : IRequestHandler<SearchHybridQuery, Searc
                 p.ExoplanetIds.Any(id => allowedExoplanetIds.Contains(id)));
         }
 
-        var results = filtered.Take(request.Take).Select(p => new PaperSearchHit
+        var selectedPaperIds = filtered.Select(x => x.PaperId).Distinct().Take(request.Take).ToList();
+        var loadedPapers = await session.LoadAsync<Paper>(selectedPaperIds, ct);
+
+        var results = selectedPaperIds.Select(id => loadedPapers[id]).Where(p => p != null).Select(p => new PaperSearchHit
         {
             Id = p.Id,
             Title = p.Title,

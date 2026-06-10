@@ -3,6 +3,7 @@ import { Sparkles, Brain, X, BookOpen, ChevronRight } from "lucide-react";
 import { motion, useScroll, useTransform } from "framer-motion";
 import Header from "../components/layout/Header";
 import StatsOverview from "../components/dashboard/StatsOverview";
+import PipelineHealth from "../components/dashboard/PipelineHealth";
 import DiscoveryChart from "../components/dashboard/DiscoveryChart";
 import RecentEventsPanel from "../components/dashboard/RecentEventsPanel";
 import HybridSearchBar from "../components/search/HybridSearchBar";
@@ -10,10 +11,7 @@ import { useT } from "../i18n/LanguageContext";
 import { useAppStore } from "../stores/appStore";
 
 import { arxivUrl } from "../lib/utils";
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import MarkdownText from "../components/ui/MarkdownText";
 
 export default function DashboardPage() {
   const t = useT();
@@ -177,8 +175,9 @@ export default function DashboardPage() {
 
       {/* SECTION 2: Holographic Metrics Layer */}
       <section className="h-screen w-full flex flex-col justify-center items-center p-8 md:p-16 pl-20 lg:pl-28 pointer-events-none">
-        <div className="w-full max-w-6xl pointer-events-auto">
+        <div className="w-full max-w-6xl pointer-events-auto space-y-4">
           <StatsOverview />
+          <PipelineHealth />
         </div>
       </section>
 
@@ -325,10 +324,8 @@ export default function DashboardPage() {
                 <Sparkles className="h-4 w-4" />
                 <span>AI SYNTHESIS</span>
               </div>
-              <div className="text-xs sm:text-[13px] text-[#ECEFF4] leading-relaxed whitespace-pre-wrap font-medium markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                  {searchResults.answer}
-                </ReactMarkdown>
+              <div className="text-xs sm:text-[13px] text-[#ECEFF4] leading-relaxed whitespace-pre-wrap font-medium">
+                <MarkdownText text={searchResults.answer} className="inline-block" />
                 {streaming && (
                   <span className="ml-1 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-[#B48EAD]" />
                 )}

@@ -6,6 +6,7 @@ import { generatePlanetTexturesGPU } from "./proceduralPlanetGPU";
 import { createGasGiantMaterial } from "./gasGiantMaterial";
 import VolumetricAtmosphere from "./VolumetricAtmosphere";
 import CloudMesh from "./CloudMesh";
+import PlanetRings from "./PlanetRings";
 import { useAppStore } from "../../stores/appStore";
 
 interface Props {
@@ -21,6 +22,8 @@ interface Props {
   inclination?: number;
   starPosition?: [number, number, number];
   position?: [number, number, number];
+  /** Equilibrium temperature (K) — drives the physics-based colour archetype. */
+  equilibriumTemperatureK?: number | null;
   /** Multiplier on orbital speed. 1 = calm cinematic default. */
   orbitSpeedScale?: number;
   /** When false, the planet stays centered (self-rotation only) and the orbit
@@ -42,12 +45,26 @@ export default function PlanetMesh({
   position = [8, 4, -5],
   orbitSpeedScale = 1,
   orbit = true,
+  equilibriumTemperatureK = null,
 }: Props) {
   const planetRef = useRef<THREE.Group>(null!);
   const meshRef = useRef<THREE.Mesh>(null!);
 
   const radius = radiusEarth ?? 1;
   const gaseous = radius >= 2.0;
+
+  // Effective temperature drives the visual archetype. Use the catalog value when
+  // present; otherwise estimate climate from orbital distance so a cold, distant world
+  // doesn't fall back to a default "Jupiter" tan just because eqTemp is missing.
+  const effectiveTempK = useMemo<number | null>(() => {
+    if (equilibriumTemperatureK != null) return equilibriumTemperatureK;
+    if (semiMajorAxisAu == null) return null;
+    if (semiMajorAxisAu >= 1.5) return 110; // cold (icy / Neptune-like)
+    if (semiMajorAxisAu >= 0.3) return 280; // temperate
+    return 1100; // hot, close-in
+  }, [equilibriumTemperatureK, semiMajorAxisAu]);
+
+  const isLava = !gaseous && (effectiveTempK ?? 0) >= 1000;
 
   const scale = useMemo(
     () => Math.min(Math.max(radius * 0.45, 0.6), 2.2), // Increased base scale to make planets visible
@@ -71,15 +88,19 @@ export default function PlanetMesh({
   const graphicsQuality = useAppStore((s) => s.graphicsQuality);
 
   // Rocky planets use procedural PBR textures; gas giants use an animated shader.
+  // Equilibrium temperature drives the colour archetype (lava → temperate → ice).
   const textures = useMemo(
     () =>
       gaseous
         ? null
-        : generatePlanetTexturesGPU(gl, seed, false, graphicsQuality === "high" ? 2048 : 512),
-    [gl, seed, gaseous, graphicsQuality]
+        : generatePlanetTexturesGPU(gl, seed, false, graphicsQuality === "high" ? 2048 : 512, effectiveTempK, isLava),
+    [gl, seed, gaseous, graphicsQuality, effectiveTempK, isLava]
   );
 
-  const gas = useMemo(() => (gaseous ? createGasGiantMaterial(seed) : null), [gaseous, seed]);
+  const gas = useMemo(
+    () => (gaseous ? createGasGiantMaterial(seed, effectiveTempK) : null),
+    [gaseous, seed, effectiveTempK]
+  );
 
   const segments = useMemo(() => {
     if (graphicsQuality === "low") return 32;
@@ -102,7 +123,29 @@ export default function PlanetMesh({
   );
 
   const showAtmosphere = !gaseous;
-  const atmosphereColor = isHwoCandidate ? "#86ffc0" : "#7fb8ff";
+
+  // Rings are reserved for genuine giants (≈ Saturn-class and up) — a sub-Neptune
+  // sized world shouldn't carry a prominent ring system. ~55% of giants get one.
+  const isGiant = radius >= 6;
+  const showRings = isGiant && seed % 100 < 55;
+  const ringColor = useMemo(() => {
+    const tK = effectiveTempK;
+    if (tK != null && tK <= 150) return "#cfe0ea"; // cold ice-giant rings
+    if (tK != null && tK >= 1000) return "#caa98a"; // hot, dusty
+    return "#d9cbb0"; // saturnian tan
+  }, [effectiveTempK]);
+
+  // Atmosphere tint follows climate: hot orange haze → temperate blue → icy pale.
+  const atmosphereColor = useMemo(() => {
+    if (isHwoCandidate) return "#86ffc0";
+    const tK = effectiveTempK;
+    if (tK == null) return "#7fb8ff";
+    if (tK >= 1000) return "#ff9966";
+    if (tK >= 330) return "#ffd9a0";
+    if (tK >= 250) return "#7fb8ff";
+    if (tK >= 180) return "#a9d8ff";
+    return "#cfe8ff";
+  }, [isHwoCandidate, effectiveTempK]);
 
   useFrame((state, delta) => {
     // Orbital translation only in orbit mode; the detail view keeps the planet
@@ -146,7 +189,7 @@ export default function PlanetMesh({
           <mesh ref={meshRef} castShadow receiveShadow geometry={geometry} material={gas.material} />
         ) : (
           <mesh ref={meshRef} castShadow receiveShadow geometry={geometry}>
-            <meshStandardMaterial
+            <meshPhysicalMaterial
               map={textures!.map}
               normalMap={textures!.normalMap}
               normalScale={normalScale}
@@ -154,6 +197,13 @@ export default function PlanetMesh({
               roughness={1}
               metalness={0}
               envMapIntensity={0.35}
+              // A thin clearcoat reads as a wet sheen — most visible on the smooth
+              // (low-roughness) oceans, giving a crisp specular sun-glint.
+              clearcoat={isLava ? 0 : 0.35}
+              clearcoatRoughness={0.12}
+              emissiveMap={textures!.emissiveMap ?? undefined}
+              emissive={isLava ? "#ffffff" : "#000000"}
+              emissiveIntensity={isLava ? 1.9 : 0}
             />
           </mesh>
         )}
@@ -168,6 +218,10 @@ export default function PlanetMesh({
               starPosition={starPosition}
             />
           </>
+        )}
+
+        {showRings && (
+          <PlanetRings scale={scale} seed={seed} color={ringColor} starPosition={starPosition} />
         )}
       </group>
     </group>

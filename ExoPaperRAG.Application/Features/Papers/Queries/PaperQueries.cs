@@ -146,13 +146,17 @@ public class FindSimilarPapersQueryHandler
     {
         using var session = _store.OpenAsyncSession();
 
-        var results = await session.Query<Paper, Papers_ByVector>()
+        var results = await session.Query<Papers_ByVector.Result, Papers_ByVector>()
             .VectorSearch(
                 indexField => indexField.WithField(x => x.Vector),
                 factory => factory.ByEmbedding(request.QueryVector))
             .Take(Math.Clamp(request.Take, 1, 50))
+            .ProjectInto<Papers_ByVector.Result>()
             .ToListAsync(ct);
 
-        return results.Select(p => p.ToResponse()).ToList();
+        var paperIds = results.Select(r => r.PaperId).Distinct().ToList();
+        var loadedPapers = await session.LoadAsync<Paper>(paperIds, ct);
+
+        return paperIds.Select(id => loadedPapers[id]).Where(p => p != null).Select(p => p.ToResponse()).ToList();
     }
 }

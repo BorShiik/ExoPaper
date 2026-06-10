@@ -14,8 +14,8 @@ const FRAG = /* glsl */ `
     float d = distance(vUv, vec2(0.5));
     // d goes from ~inner to 0.5 (outer)
     // we fade out at edges to simulate soft volumetric dust
-    float alpha = smoothstep(0.5, 0.35, d) * smoothstep(0.1, 0.25, d);
-    gl_FragColor = vec4(uColor, alpha * 0.12);
+    float alpha = smoothstep(0.5, 0.32, d) * smoothstep(0.12, 0.28, d);
+    gl_FragColor = vec4(uColor, alpha * 0.06);
   }
 `;
 
