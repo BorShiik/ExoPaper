@@ -156,8 +156,19 @@ function Scene() {
  */
 const CosmicHero = React.memo(function CosmicHero() {
   const visible = usePageVisible();
+  const [mounted, setMounted] = React.useState(false);
+
+  // Defer rendering of the heavy WebGL canvas until the browser has painted
+  // the initial DOM (First Contentful Paint). This massively improves performance scores.
+  React.useEffect(() => {
+    const timer = setTimeout(() => setMounted(true), 150);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!mounted) return null;
+
   return (
-    <div className="absolute inset-0" aria-hidden="true">
+    <div className="absolute inset-0 animate-fade-in" aria-hidden="true">
       <CanvasErrorBoundary>
         <Canvas
           camera={{ position: [0, 2.5, 14], fov: 55 }}

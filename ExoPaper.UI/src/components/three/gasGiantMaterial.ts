@@ -93,8 +93,8 @@ const GAS_DIFFUSE = /* glsl */ `
 // `vViewPosition` are both available at this point in the standard shader.
 const GAS_RIM = /* glsl */ `
   {
-    float fres = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
-    totalEmissiveRadiance += uColorC * fres * 0.5;
+    float fres = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 5.5);
+    totalEmissiveRadiance += uColorC * fres * 0.22;
   }
 `;
 

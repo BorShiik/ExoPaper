@@ -16,6 +16,28 @@ function cacheKey(text: string, target: string): string {
   return `${target}::${text}`;
 }
 
+// ── Session circuit breaker ────────────────────────────────────────────────
+// If the translation endpoint keeps failing (e.g. proxy/LibreTranslate 500s) we must
+// NOT keep retrying — that hammers the server and, combined with re-renders, can spin
+// into a request storm. After a few consecutive failures, give up for the session and
+// just show the original text.
+const FAILURE_LIMIT = 4;
+let consecutiveFailures = 0;
+let translationDisabled = false;
+
+function recordSuccess() {
+  consecutiveFailures = 0;
+}
+function recordFailure() {
+  consecutiveFailures += 1;
+  if (consecutiveFailures >= FAILURE_LIMIT) {
+    translationDisabled = true;
+    console.warn(
+      `[useTranslate] Disabled for this session after ${FAILURE_LIMIT} consecutive failures.`
+    );
+  }
+}
+
 export function useTranslate(
   text: string | undefined | null,
   sourceLocale = "en"
@@ -26,8 +48,8 @@ export function useTranslate(
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    // No translation needed — same locale or empty text.
-    if (!text || locale === sourceLocale) {
+    // No translation needed — same locale, empty text, or breaker tripped.
+    if (!text || locale === sourceLocale || translationDisabled) {
       setTranslated(text ?? "");
       setIsTranslating(false);
       return;
@@ -69,10 +91,12 @@ export function useTranslate(
       .then((data) => {
         const result = data.translatedText ?? text;
         cache.set(key, result);
+        recordSuccess();
         setTranslated(result);
       })
       .catch((err) => {
         if (err.name !== "AbortError") {
+          recordFailure();
           console.warn("[useTranslate] Translation failed, using original:", err);
           setTranslated(text);
         }
@@ -103,7 +127,7 @@ export function useTranslateBatch(
   useEffect(() => {
     const cleaned = texts.map((t) => t ?? "");
 
-    if (locale === sourceLocale) {
+    if (locale === sourceLocale || translationDisabled) {
       setTranslations(cleaned);
       setIsTranslating(false);
       return;

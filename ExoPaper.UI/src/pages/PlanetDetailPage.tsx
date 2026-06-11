@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense, lazy } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Info, Loader2, Gauge, Brain, BookOpen, Telescope, Tag } from "lucide-react";
+import { ChevronLeft, ChevronsRight, Info, Loader2, Gauge, Brain, BookOpen, Telescope, Tag } from "lucide-react";
 import Header from "../components/layout/Header";
 import { getExoplanetById } from "../api/exoplanets";
 import type { Exoplanet } from "../types";
@@ -12,10 +12,32 @@ import ParametersGrid from "../components/planet/ParametersGrid";
 import UncertaintyPanel from "../components/planet/UncertaintyPanel";
 import LinkedPapers from "../components/planet/LinkedPapers";
 import AskPanel from "../components/planet/AskPanel";
-import ExoplanetScene from "../components/three/ExoplanetScene";
 import PlanetSummaryPanel from "../components/planet/PlanetSummaryPanel";
 
+// Delay loading the 3D scene so the text details and API fetch can start/render immediately
+const ExoplanetScene = lazy(() => {
+  return new Promise<typeof import("../components/three/ExoplanetScene")>((resolve) => {
+    setTimeout(() => resolve(import("../components/three/ExoplanetScene")), 250);
+  });
+});
+
 type TabKey = "params" | "ai" | "lit";
+
+const PANEL_W = 500; // px — fixed width of the desktop slide-over panel
+
+/** True when the viewport is ≥ 1024 px (Tailwind `lg`). */
+function useIsDesktop() {
+  const [desktop, setDesktop] = useState(
+    typeof window !== "undefined" ? window.innerWidth >= 1024 : true,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia("(min-width: 1024px)");
+    const handler = (e: MediaQueryListEvent) => setDesktop(e.matches);
+    mql.addEventListener("change", handler);
+    return () => mql.removeEventListener("change", handler);
+  }, []);
+  return desktop;
+}
 
 export default function PlanetDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,6 +47,8 @@ export default function PlanetDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("params");
+  const [panelOpen, setPanelOpen] = useState(true);
+  const isDesktop = useIsDesktop();
 
   const fullId = id && !id.startsWith("exoplanets/") ? `exoplanets/${id}` : id;
 
@@ -56,10 +80,73 @@ export default function PlanetDetailPage() {
     { key: "lit", label: t("linked.title"), icon: BookOpen },
   ];
 
+  /* ─── Shared panel content (rendered in both mobile & desktop containers) ─── */
+  const panelBody = (
+    <div className="custom-scrollbar flex-1 overflow-y-auto px-5 pb-10">
+      {/* AI Summary Panel */}
+      <PlanetSummaryPanel planetId={planet?.id ?? ""} autoLoad={planet?.hasCachedAiSummary ?? false} />
+
+      {/* Tabs — sticky so they stay reachable while scrolling a long profile */}
+      <div className="sticky top-0 z-20 -mx-5 mb-4 bg-gradient-to-b from-[#05070f] via-[#05070f]/90 to-transparent px-5 pb-3 pt-1">
+        <div className="flex gap-1 rounded-xl border border-white/10 bg-[#0d1322]/80 p-1 backdrop-blur-sm">
+          {TABS.map((tb) => {
+            const active = tab === tb.key;
+            const Icon = tb.icon;
+            return (
+              <button
+                key={tb.key}
+                onClick={() => setTab(tb.key)}
+                className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                  active ? "text-[#05070f]" : "text-[#9aa7bd] hover:text-[#ECEFF4]"
+                }`}
+              >
+                {active && (
+                  <motion.span
+                    layoutId="detail-tab-pill"
+                    className="absolute inset-0 rounded-lg bg-[#88C0D0]"
+                    transition={{ type: "spring", stiffness: 480, damping: 36 }}
+                  />
+                )}
+                <span className="relative flex items-center gap-1.5">
+                  <Icon className="h-3.5 w-3.5" />
+                  {tb.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          className="space-y-5"
+        >
+          {tab === "params" && planet && <ParametersGrid planet={planet} />}
+          {tab === "ai" && planet && (
+            <>
+              <UncertaintyPanel planetId={planet.id} autoLoad={planet.hasCachedUncertainty ?? false} />
+              <AskPanel exoplanetId={planet.id} />
+            </>
+          )}
+          {tab === "lit" && planet && <LinkedPapers planetId={planet.id} />}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+
   return (
     <div className="relative h-screen overflow-hidden pointer-events-auto text-[#E5E9F0]">
-      <div className="absolute top-4 left-0 w-full z-50">
-        <Header title={t("page.planet")} />
+      {/* Header wrapper — must not block clicks on the side panel underneath it! */}
+      <div className="absolute top-4 left-0 w-full z-50 pointer-events-none flex justify-center">
+        <div className="pointer-events-auto">
+          <Header title={t("page.planet")} />
+        </div>
       </div>
 
       {loading && (
@@ -86,10 +173,16 @@ export default function PlanetDetailPage() {
       )}
 
       {!loading && !error && planet && (
-        <div className="flex flex-col lg:h-screen lg:flex-row">
-          {/* ───────── LEFT 60% · 3D viewport (orbit-controls enabled) ───────── */}
-          <div className="relative h-[55vh] w-full lg:h-screen lg:w-3/5">
-            <ExoplanetScene planet={planet} />
+        <div className="flex flex-col lg:relative lg:h-screen">
+          {/* ───────── 3D viewport — always full-width on desktop ───────── */}
+          <div className="relative h-[55vh] w-full lg:h-screen">
+            <Suspense fallback={
+              <div className="flex h-full w-full items-center justify-center">
+                <div className="h-8 w-8 animate-pulse rounded-full bg-[#88C0D0]/30 shadow-[0_0_15px_#88C0D0]" />
+              </div>
+            }>
+              <ExoplanetScene planet={planet} />
+            </Suspense>
 
             {/* Top scrim for header + controls readability */}
             <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/70 to-transparent" />
@@ -139,69 +232,42 @@ export default function PlanetDetailPage() {
             </div>
           </div>
 
-          {/* ───────── RIGHT 40% · telemetry HUD ───────── */}
-          <div className="flex w-full flex-col border-l border-white/5 bg-gradient-to-b from-[#0a0e1a]/70 to-[#05070f]/40 pt-6 backdrop-blur-sm lg:h-screen lg:w-2/5 lg:pt-24">
-            
-            {/* Single scroll area: AI profile (can be tall), sticky tabs, then tab content. */}
-            <div className="custom-scrollbar flex-1 overflow-y-auto px-5 pb-10">
-              {/* AI Summary Panel */}
-              <PlanetSummaryPanel planetId={planet.id} autoLoad={planet.hasCachedAiSummary ?? false} />
-
-              {/* Tabs — sticky so they stay reachable while scrolling a long profile */}
-              <div className="sticky top-0 z-20 -mx-5 mb-4 bg-gradient-to-b from-[#05070f] via-[#05070f]/90 to-transparent px-5 pb-3 pt-1">
-                <div className="flex gap-1 rounded-xl border border-white/10 bg-[#0d1322]/80 p-1 backdrop-blur-sm">
-                  {TABS.map((tb) => {
-                    const active = tab === tb.key;
-                    const Icon = tb.icon;
-                    return (
-                      <button
-                        key={tb.key}
-                        onClick={() => setTab(tb.key)}
-                        className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                          active ? "text-[#05070f]" : "text-[#9aa7bd] hover:text-[#ECEFF4]"
-                        }`}
-                      >
-                        {active && (
-                          <motion.span
-                            layoutId="detail-tab-pill"
-                            className="absolute inset-0 rounded-lg bg-[#88C0D0]"
-                            transition={{ type: "spring", stiffness: 480, damping: 36 }}
-                          />
-                        )}
-                        <span className="relative flex items-center gap-1.5">
-                          <Icon className="h-3.5 w-3.5" />
-                          {tb.label}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Tab content */}
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={tab}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-                  className="space-y-5"
-                >
-                  {tab === "params" && <ParametersGrid planet={planet} />}
-                  {tab === "ai" && (
-                    <>
-                      <UncertaintyPanel planetId={planet.id} autoLoad={planet.hasCachedUncertainty ?? false} />
-                      <AskPanel exoplanetId={planet.id} />
-                    </>
-                  )}
-                  {tab === "lit" && <LinkedPapers planetId={planet.id} />}
-                </motion.div>
-              </AnimatePresence>
-            </div>
+          {/* ───────── MOBILE: panel below the 3D scene (always visible) ───────── */}
+          <div className="flex flex-col w-full border-t border-white/5 bg-gradient-to-b from-[#0a0e1a] to-[#05070f] pt-6 lg:hidden">
+            {panelBody}
           </div>
+
+          {/* ───────── DESKTOP: slide-over panel from the right ───────── */}
+          <motion.div
+            initial={false}
+            animate={{ x: isDesktop ? (panelOpen ? 0 : PANEL_W) : 0 }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            className="hidden lg:flex flex-col absolute right-0 top-0 h-screen z-40"
+            style={{ width: PANEL_W }}
+          >
+            {/* ── Toggle handle — sticks out from the panel's left edge ── */}
+            <button
+              onClick={() => setPanelOpen((p) => !p)}
+              className="absolute -left-8 top-1/2 -translate-y-1/2 z-50 flex items-center justify-center h-20 w-8 rounded-l-xl border border-r-0 border-white/[0.08] bg-[#0a0e1a]/80 backdrop-blur-xl text-[#88C0D0] shadow-[0_0_20px_-4px_rgba(136,192,208,0.15)] hover:bg-[#88C0D0]/10 hover:text-white hover:shadow-[0_0_28px_-4px_rgba(136,192,208,0.35)] hover:border-[#88C0D0]/25 transition-all duration-300 group cursor-pointer"
+              title={panelOpen ? "Hide panel" : "Show panel"}
+            >
+              <motion.div
+                animate={{ rotate: panelOpen ? 0 : 180 }}
+                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <ChevronsRight className="h-4 w-4 transition-transform duration-300 group-hover:scale-110" />
+              </motion.div>
+            </button>
+
+            {/* Inner wrapper for the background and content to apply overflow-hidden 
+                without clipping the button that sticks out the left side. */}
+            <div className="flex flex-col flex-1 border-l border-white/5 bg-gradient-to-b from-[#0a0e1a]/95 to-[#05070f]/95 backdrop-blur-2xl pt-6 overflow-hidden">
+              {panelBody}
+            </div>
+          </motion.div>
         </div>
       )}
     </div>
   );
 }
+

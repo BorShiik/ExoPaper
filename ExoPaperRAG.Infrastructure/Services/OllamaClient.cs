@@ -76,7 +76,8 @@ public class OllamaClient : IOllamaClient
     }
 
     /// <inheritdoc />
-    public async Task<string> GenerateAsync(string prompt, string? systemPrompt = null, CancellationToken ct = default)
+    public async Task<string> GenerateAsync(
+        string prompt, string? systemPrompt = null, CancellationToken ct = default, bool jsonMode = false)
     {
         var request = new GenerateRequest
         {
@@ -85,7 +86,8 @@ public class OllamaClient : IOllamaClient
             System = systemPrompt,
             Stream = false, // get full response at once
             KeepAlive = KeepAlive,
-            Options = GenerationOptions
+            Options = GenerationOptions,
+            Format = jsonMode ? "json" : null // grammar-constrain output to valid JSON
         };
 
         _logger.LogDebug("Requesting generation from Ollama ({Model}), prompt length: {Len}",
@@ -213,6 +215,9 @@ public class OllamaClient : IOllamaClient
         public string? KeepAlive { get; set; }
 
         public Dictionary<string, object>? Options { get; set; }
+
+        /// <summary>"json" forces Ollama to emit syntactically valid JSON. Null = free text.</summary>
+        public string? Format { get; set; }
     }
 
     private sealed class GenerateResponse

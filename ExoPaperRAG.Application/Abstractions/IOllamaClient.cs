@@ -12,9 +12,12 @@ public interface IOllamaClient
     Task<float[]> GetEmbeddingAsync(string text, CancellationToken ct = default);
 
     /// <summary>
-    /// Generates a text completion using the configured generation model (llama3:8b).
+    /// Generates a text completion using the configured generation model.
+    /// When <paramref name="jsonMode"/> is true, Ollama is constrained to emit syntactically
+    /// valid JSON (grammar-enforced) — essential for reliable structured output from small models.
     /// </summary>
-    Task<string> GenerateAsync(string prompt, string? systemPrompt = null, CancellationToken ct = default);
+    Task<string> GenerateAsync(
+        string prompt, string? systemPrompt = null, CancellationToken ct = default, bool jsonMode = false);
 
     /// <summary>
     /// Streams a text completion token-by-token as it is produced by the model.

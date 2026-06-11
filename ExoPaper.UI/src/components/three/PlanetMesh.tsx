@@ -147,6 +147,12 @@ export default function PlanetMesh({
     return "#cfe8ff";
   }, [isHwoCandidate, effectiveTempK]);
 
+  const equatorTilt = useMemo<[number, number, number]>(() => {
+    const a = ((seed % 53) / 53 - 0.5) * 0.9;
+    const b = ((seed % 31) / 31 - 0.5) * 0.5;
+    return [a, 0, b];
+  }, [seed]);
+
   useFrame((state, delta) => {
     // Orbital translation only in orbit mode; the detail view keeps the planet
     // centered at the group origin so the camera can focus on it.
@@ -184,45 +190,47 @@ export default function PlanetMesh({
 
       {/* 2. The Planet Mesh Group: Moves around the central origin */}
       <group ref={planetRef}>
-        {gas ? (
-          // Gas giant: animated banded atmosphere (PBR-lit via onBeforeCompile).
-          <mesh ref={meshRef} castShadow receiveShadow geometry={geometry} material={gas.material} />
-        ) : (
-          <mesh ref={meshRef} castShadow receiveShadow geometry={geometry}>
-            <meshPhysicalMaterial
-              map={textures!.map}
-              normalMap={textures!.normalMap}
-              normalScale={normalScale}
-              roughnessMap={textures!.roughnessMap}
-              roughness={1}
-              metalness={0}
-              envMapIntensity={0.35}
-              // A thin clearcoat reads as a wet sheen — most visible on the smooth
-              // (low-roughness) oceans, giving a crisp specular sun-glint.
-              clearcoat={isLava ? 0 : 0.35}
-              clearcoatRoughness={0.12}
-              emissiveMap={textures!.emissiveMap ?? undefined}
-              emissive={isLava ? "#ffffff" : "#000000"}
-              emissiveIntensity={isLava ? 1.9 : 0}
-            />
-          </mesh>
-        )}
+        <group rotation={equatorTilt}>
+          {gas ? (
+            // Gas giant: animated banded atmosphere (PBR-lit via onBeforeCompile).
+            <mesh ref={meshRef} castShadow receiveShadow geometry={geometry} material={gas.material} />
+          ) : (
+            <mesh ref={meshRef} castShadow receiveShadow geometry={geometry}>
+              <meshPhysicalMaterial
+                map={textures!.map}
+                normalMap={textures!.normalMap}
+                normalScale={normalScale}
+                roughnessMap={textures!.roughnessMap}
+                roughness={1}
+                metalness={0}
+                envMapIntensity={0.35}
+                // A thin clearcoat reads as a wet sheen — most visible on the smooth
+                // (low-roughness) oceans, giving a crisp specular sun-glint.
+                clearcoat={isLava ? 0 : 0.35}
+                clearcoatRoughness={0.12}
+                emissiveMap={textures!.emissiveMap ?? undefined}
+                emissive={isLava ? "#ffffff" : "#000000"}
+                emissiveIntensity={isLava ? 1.9 : 0}
+              />
+            </mesh>
+          )}
 
-        {showAtmosphere && (
-          <>
-            <CloudMesh radius={scale} seed={seed} />
-            <VolumetricAtmosphere
-              radius={scale}
-              color={atmosphereColor}
-              scale={1.12}
-              starPosition={starPosition}
-            />
-          </>
-        )}
+          {showAtmosphere && (
+            <>
+              <CloudMesh radius={scale} seed={seed} />
+              <VolumetricAtmosphere
+                radius={scale}
+                color={atmosphereColor}
+                scale={1.12}
+                starPosition={starPosition}
+              />
+            </>
+          )}
 
-        {showRings && (
-          <PlanetRings scale={scale} seed={seed} color={ringColor} starPosition={starPosition} />
-        )}
+          {showRings && (
+            <PlanetRings scale={scale} seed={seed} color={ringColor} starPosition={starPosition} />
+          )}
+        </group>
       </group>
     </group>
   );

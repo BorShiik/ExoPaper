@@ -13,10 +13,13 @@ services:
       - RAVEN_PublicServerUrl=http://ravendb-a:8080
       - RAVEN_PublicServerUrl_Tcp=tcp://ravendb-a:38888
     ports:
-      - "8080:8080"      
-      - "38888:38888"    
+      - "8080:8080"
+      - "38888:38888"
     volumes:
       - ravendb_data_a:/var/lib/ravendb/data
+    # RavenDB auto-detects the cgroup limit and sizes its memory budget to fit,
+    # so 3 nodes coexist without exhausting host RAM.
+    mem_limit: 1500m
 
   ravendb-b:
     image: ravendb/ravendb:latest
@@ -34,6 +37,7 @@ services:
       - "38889:38888"    
     volumes:
       - ravendb_data_b:/var/lib/ravendb/data
+    mem_limit: 1500m
 
   ravendb-c:
     image: ravendb/ravendb:latest
@@ -51,6 +55,7 @@ services:
       - "38890:38888"    
     volumes:
       - ravendb_data_c:/var/lib/ravendb/data
+    mem_limit: 1500m
 
   ollama:
     image: ollama/ollama:latest
@@ -66,6 +71,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    mem_limit: 5g
     restart: unless-stopped
 
   ollama-init:
@@ -98,8 +104,9 @@ services:
       - ravendb-c
       - ollama
     restart: on-failure
+    mem_limit: 1g
     ports:
-      - "5000:8080"      
+      - "5000:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - RavenSettings__Urls__0=http://ravendb-a:8080
@@ -129,6 +136,9 @@ services:
     environment:
       - LT_LOAD_ONLY=en,pl
       - LT_DISABLE_WEB_UI=true
+      - LT_UPDATE_MODELS=true   # ensure the en/pl model is downloaded on start
+      - LT_THREADS=4            # handle the panel's parallel section translations
+    mem_limit: 1500m
     restart: unless-stopped
 
 volumes:

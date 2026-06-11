@@ -89,12 +89,10 @@ export default function PlanetRings({ scale, seed, color, starPosition }: Props)
   const inner = scale * 1.35;
   const outer = scale * 2.25;
 
-  // Seeded tilt so each ringed giant looks distinct.
+  // Seeded tilt is now handled by the parent PlanetMesh so the planet equator aligns with the rings
   const tilt = useMemo<[number, number, number]>(() => {
-    const a = ((seed % 53) / 53 - 0.5) * 0.9;
-    const b = ((seed % 31) / 31 - 0.5) * 0.5;
-    return [-Math.PI / 2 + a, 0, b];
-  }, [seed]);
+    return [-Math.PI / 2, 0, 0];
+  }, []);
 
   const geometry = useMemo(() => new THREE.RingGeometry(inner, outer, 180, 8), [inner, outer]);
 

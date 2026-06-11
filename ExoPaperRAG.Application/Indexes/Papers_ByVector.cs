@@ -44,6 +44,10 @@ namespace ExoPaperRAG.Application.Indexes
             
             // Explicitly mark the field as a vector field for Corax
             VectorIndexes.Add(x => x.Vector, new VectorOptions());
+
+            // Ensure ExoplanetIds are not tokenized by the default analyzer
+            // so we can filter exactly by "exoplanets/HD-95086-b"
+            Index(x => x.ExoplanetIds, FieldIndexing.Exact);
         }
     }
 }

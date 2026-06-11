@@ -1,19 +1,27 @@
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import { Suspense, lazy } from "react";
+
+const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
 
 interface Props {
   text: string;
   className?: string;
 }
 
+/**
+ * Lightweight wrapper that code-splits the heavy markdown/KaTeX renderer. While the chunk
+ * loads (or if it's not needed yet) it shows the raw text as plain prose, so nothing flashes
+ * empty. All call sites stay unchanged.
+ */
 export default function MarkdownText({ text, className = "" }: Props) {
   return (
-    <div className={`prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-[#070b14]/70 prose-pre:border prose-pre:border-white/10 ${className}`}>
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-        {text}
-      </ReactMarkdown>
-    </div>
+    <Suspense
+      fallback={
+        <div className={`prose prose-invert prose-sm max-w-none whitespace-pre-wrap ${className}`}>
+          {text}
+        </div>
+      }
+    >
+      <MarkdownRenderer text={text} className={className} />
+    </Suspense>
   );
 }

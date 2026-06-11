@@ -83,7 +83,7 @@ export default function VolumetricAtmosphere({
         fragmentShader: FRAG,
         transparent: true,
         blending: THREE.AdditiveBlending,
-        side: THREE.BackSide,
+        side: THREE.FrontSide,
         depthWrite: false,
       }),
     [color, starPosition]

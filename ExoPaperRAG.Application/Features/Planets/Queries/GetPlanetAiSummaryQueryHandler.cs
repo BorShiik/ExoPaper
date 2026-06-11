@@ -110,7 +110,7 @@ public class GetPlanetAiSummaryQueryHandler
                 "- key_highlights should be a markdown bulleted list (- item) of 3-5 notable facts.\n" +
                 "- comparative_context MUST compare the planet numerically to Earth and/or Jupiter " +
                 "(e.g., '3.2× the mass of Earth', '0.8× Jupiter's radius').\n" +
-                "- habitability_assessment should assess temperature, radiation, atmosphere potential.\n" +
+                "- habitability_assessment: STRICTLY evaluate habitability based on Equilibrium Temperature and orbital distance/period. If T_eq > 320K or period < 10 days, explicitly state it is far too hot for liquid water and NOT habitable.\n" +
                 "- If a section has no relevant data, set it to an empty string.\n" +
                 "- Do NOT invent specific measurements, but you MAY add well-established general " +
                 "scientific context typical for this planet's class (e.g. expected composition, " +
@@ -137,6 +137,7 @@ public class GetPlanetAiSummaryQueryHandler
                 "applicable section informative; only leave a section empty if nothing meaningful " +
                 "can be said. Do NOT invent specific unmeasured numbers.\n" +
                 "- key_highlights: markdown bulleted list (- item) of 3-5 facts.\n" +
+                "- habitability_assessment: STRICTLY evaluate habitability based on Equilibrium Temperature and orbital distance/period. If T_eq > 320K or period < 10 days, explicitly state it is far too hot for liquid water and NOT habitable.\n" +
                 "- comparative_context: compare to Earth and/or Jupiter numerically.\n" +
                 "- literature_synthesis: set to empty string (no papers available).\n" +
                 "- For reference: Earth mass = 1 M⊕, Jupiter mass = 317.8 M⊕, Earth radius = 1 R⊕, Jupiter radius = 11.2 R⊕.";
@@ -149,7 +150,7 @@ public class GetPlanetAiSummaryQueryHandler
         PlanetAiSummaryResult result;
         try
         {
-            var rawResponse = await _ollama.GenerateAsync(userPrompt, systemPrompt, ct);
+            var rawResponse = await _ollama.GenerateAsync(userPrompt, systemPrompt, ct, jsonMode: true);
             var parsed = ParseStructuredSummary(rawResponse, request.ExoplanetId, planet.Name);
 
             // Model returned prose instead of JSON (or empty) → use the deterministic,

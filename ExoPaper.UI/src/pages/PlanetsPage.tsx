@@ -116,12 +116,20 @@ function PlanetCard({
   const rx = useSpring(useTransform(my, [-0.5, 0.5], [8, -8]), { stiffness: 220, damping: 18 });
   const ry = useSpring(useTransform(mx, [-0.5, 0.5], [-10, 10]), { stiffness: 220, damping: 18 });
 
+  // Cache the rect on enter so the per-move handler never reads layout (which would force a
+  // synchronous reflow on every mousemove across the whole 24-card grid).
+  const rectRef = useRef<DOMRect | null>(null);
+  const captureRect = (e: React.MouseEvent<HTMLButtonElement>) => {
+    rectRef.current = e.currentTarget.getBoundingClientRect();
+  };
   const handleMove = (e: React.MouseEvent<HTMLButtonElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect = rectRef.current;
+    if (!rect) return;
     mx.set((e.clientX - rect.left) / rect.width - 0.5);
     my.set((e.clientY - rect.top) / rect.height - 0.5);
   };
   const reset = () => {
+    rectRef.current = null;
     mx.set(0);
     my.set(0);
   };
@@ -130,6 +138,7 @@ function PlanetCard({
     <motion.button
       type="button"
       onClick={onOpen}
+      onMouseEnter={captureRect}
       onMouseMove={handleMove}
       onMouseLeave={reset}
       style={{ rotateX: rx, rotateY: ry, transformPerspective: 900 }}

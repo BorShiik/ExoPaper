@@ -55,7 +55,25 @@ export function useSignalR() {
         setConnected(false);
       });
 
+    // An open WebSocket blocks the browser's back/forward cache (bfcache). Release it when the
+    // page is hidden and re-establish it when the page is restored, so navigation stays instant.
+    const handlePageHide = () => {
+      connection.stop().catch(() => {});
+    };
+    const handlePageShow = () => {
+      if (connection.state === signalR.HubConnectionState.Disconnected) {
+        connection
+          .start()
+          .then(() => setConnected(true))
+          .catch(() => setConnected(false));
+      }
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+
     return () => {
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
       setConnection(null);
       connection.stop();
     };

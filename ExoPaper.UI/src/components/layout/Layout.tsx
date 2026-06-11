@@ -1,6 +1,14 @@
+import { Suspense, lazy } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import FloatingNav from "./FloatingNav";
-import CosmicHero from "../three/CosmicHero";
+
+const CosmicHero = lazy(() => {
+  return new Promise<typeof import("../three/CosmicHero")>((resolve) => {
+    // Delay the download and parsing of the huge three.js bundle by 300ms.
+    // This gives the browser enough time to paint the 2D UI (FCP) first.
+    setTimeout(() => resolve(import("../three/CosmicHero")), 300);
+  });
+});
 
 export default function Layout() {
   const location = useLocation();
@@ -21,7 +29,9 @@ export default function Layout() {
             if (scrollEl) scrollEl.scrollTop += e.deltaY;
           }}
         >
-          <CosmicHero />
+          <Suspense fallback={null}>
+            <CosmicHero />
+          </Suspense>
         </div>
       )}
 
