@@ -60,4 +60,10 @@ public class ArxivSettings
     /// disables filtering (keep everything).
     /// </summary>
     public List<string> RelevantCategories { get; set; } = new() { "astro-ph.EP" };
+
+    /// <summary>Whether to run the daily scheduled broad arXiv harvester job.</summary>
+    public bool EnableScheduledHarvesting { get; set; } = true;
+
+    /// <summary>Whether to run the continuous targeted per-planet arXiv harvester job.</summary>
+    public bool EnableTargetedHarvesting { get; set; } = true;
 }

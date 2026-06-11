@@ -141,21 +141,29 @@ namespace ExoPaperRAG.Api
                     .WithCronSchedule("0 0 2 * * ?")
                     .WithDescription("Daily NASA exoplanet sync"));
 
-                var arxivJobKey = new JobKey("ArxivHarvesterJob");
-                q.AddJob<ArxivHarvesterJob>(opts => opts.WithIdentity(arxivJobKey));
-                q.AddTrigger(opts => opts
-                    .ForJob(arxivJobKey)
-                    .WithIdentity("ArxivHarvesterTrigger")
-                    .WithCronSchedule("0 0 3 * * ?")
-                    .WithDescription("Daily arXiv paper harvesting"));
+                var arxivSettings = builder.Configuration.GetSection(ArxivSettings.SectionName).Get<ArxivSettings>() ?? new ArxivSettings();
 
-                var targetedJobKey = new JobKey("TargetedHarvesterJob");
-                q.AddJob<TargetedHarvesterJob>(opts => opts.WithIdentity(targetedJobKey));
-                q.AddTrigger(opts => opts
-                    .ForJob(targetedJobKey)
-                    .WithIdentity("TargetedHarvesterTrigger")
-                    .WithSimpleSchedule(x => x.WithIntervalInMinutes(1).RepeatForever())
-                    .WithDescription("Continuous targeted arXiv harvesting"));
+                if (arxivSettings.EnableScheduledHarvesting)
+                {
+                    var arxivJobKey = new JobKey("ArxivHarvesterJob");
+                    q.AddJob<ArxivHarvesterJob>(opts => opts.WithIdentity(arxivJobKey));
+                    q.AddTrigger(opts => opts
+                        .ForJob(arxivJobKey)
+                        .WithIdentity("ArxivHarvesterTrigger")
+                        .WithCronSchedule("0 0 3 * * ?")
+                        .WithDescription("Daily arXiv paper harvesting"));
+                }
+
+                if (arxivSettings.EnableTargetedHarvesting)
+                {
+                    var targetedJobKey = new JobKey("TargetedHarvesterJob");
+                    q.AddJob<TargetedHarvesterJob>(opts => opts.WithIdentity(targetedJobKey));
+                    q.AddTrigger(opts => opts
+                        .ForJob(targetedJobKey)
+                        .WithIdentity("TargetedHarvesterTrigger")
+                        .WithSimpleSchedule(x => x.WithIntervalInMinutes(1).RepeatForever())
+                        .WithDescription("Continuous targeted arXiv harvesting"));
+                }
             });
 
             builder.Services.AddQuartzHostedService(opts => opts.WaitForJobsToComplete = true);

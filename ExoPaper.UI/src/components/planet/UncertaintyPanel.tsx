@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Brain, AlertTriangle, Cpu, RotateCcw } from "lucide-react";
+import { Brain, AlertTriangle, Cpu, RotateCcw, Languages } from "lucide-react";
 import { getUncertaintySummary } from "../../api/exoplanets";
 import type { UncertaintySummary } from "../../types";
 import { useT } from "../../i18n/LanguageContext";
+import { useTranslate } from "../../hooks/useTranslate";
 import MarkdownText from "../ui/MarkdownText";
 
 interface Props {
@@ -22,6 +23,21 @@ const DIAG_LINES = [
   ">> [LLM] Synthesizing empirical discrepancy report…",
 ];
 
+/** Translatable text block — shows original while translation is pending. */
+function TranslatedBlock({ text, className = "" }: { text: string; className?: string }) {
+  const { translated, isTranslating } = useTranslate(text);
+  return (
+    <div className={`relative ${className}`}>
+      {isTranslating && (
+        <div className="absolute -top-1 right-0 flex items-center gap-1 text-[10px] text-[#88C0D0]/60">
+          <Languages className="h-3 w-3 animate-pulse" />
+        </div>
+      )}
+      <MarkdownText text={translated} />
+    </div>
+  );
+}
+
 /** Compact numeric formatting for measurement ranges (handles very large/small values). */
 function fmt(v: number): string {
   if (!Number.isFinite(v)) return "—";
@@ -38,6 +54,7 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
   const [step, setStep] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoLoadedFor = useRef<string | null>(null);
+  const [expandedPapers, setExpandedPapers] = useState<Set<string>>(new Set());
 
   // Stream the diagnostic lines while the request is in flight.
   useEffect(() => {
@@ -53,10 +70,19 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
     };
   }, [loading]);
 
+  const togglePaper = (paperId: string) => {
+    setExpandedPapers((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) next.delete(paperId); else next.add(paperId);
+      return next;
+    });
+  };
+
   const handleAnalyze = async (regenerate = false) => {
     setLoading(true);
     setError(null);
     setData(null);
+    setExpandedPapers(new Set());
     try {
       const result = await getUncertaintySummary(planetId, regenerate);
       setData(result);
@@ -148,7 +174,7 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
               {t("unc.aiAnalysis")}
             </p>
             <div className="text-xs leading-relaxed text-[#cdd6e6]">
-              <MarkdownText text={data.analysisSummary} />
+              <TranslatedBlock text={data.analysisSummary} />
             </div>
           </div>
 
@@ -207,17 +233,28 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
                 {t("unc.referenced", { count: conflictCount })}
               </p>
               <div className="space-y-2">
-                {data.conflicts.map((c) => (
-                  <div
-                    key={c.paperId}
-                    className="rounded-xl border border-white/[0.06] border-l-2 border-l-[#EBCB8B]/60 bg-[#0d1322]/50 p-3"
-                  >
-                    <p className="line-clamp-1 text-xs font-semibold text-[#ECEFF4]">{c.paperTitle}</p>
-                    <div className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-[#9aa7bd] font-medium">
-                      <MarkdownText text={c.relevantText} />
+                {data.conflicts.map((c) => {
+                  const isExpanded = expandedPapers.has(c.paperId);
+                  return (
+                    <div
+                      key={c.paperId}
+                      onClick={() => togglePaper(c.paperId)}
+                      className="cursor-pointer rounded-xl border border-white/[0.06] border-l-2 border-l-[#EBCB8B]/60 bg-[#0d1322]/50 p-3.5 transition-all hover:border-[#EBCB8B]/30 hover:bg-[#0d1322]/80"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className={`text-xs font-semibold text-[#ECEFF4] transition-colors group-hover:text-white ${isExpanded ? "" : "line-clamp-1"}`}>
+                          {c.paperTitle}
+                        </p>
+                        <span className="text-[10px] text-[#EBCB8B]/70 shrink-0 font-medium select-none hover:text-[#EBCB8B]">
+                          {isExpanded ? t("synthesis.collapse") : t("synthesis.expand")}
+                        </span>
+                      </div>
+                      <div className={`mt-1.5 text-[11px] leading-relaxed text-[#9aa7bd] font-medium ${isExpanded ? "" : "line-clamp-3"}`}>
+                        <TranslatedBlock text={c.relevantText} />
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -230,3 +267,4 @@ export default function UncertaintyPanel({ planetId, autoLoad = false }: Props) 
     </div>
   );
 }
+

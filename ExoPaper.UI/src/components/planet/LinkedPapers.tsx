@@ -21,6 +21,7 @@ export default function LinkedPapers({ planetId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [harvesting, setHarvesting] = useState(false);
   const [harvestMsg, setHarvestMsg] = useState<string | null>(null);
+  const [expandedPapers, setExpandedPapers] = useState<Set<string>>(new Set());
 
   const loadPapers = useCallback(async () => {
     setLoading(true);
@@ -36,6 +37,14 @@ export default function LinkedPapers({ planetId }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planetId]);
+
+  const togglePaper = (paperId: string) => {
+    setExpandedPapers((prev) => {
+      const next = new Set(prev);
+      if (next.has(paperId)) next.delete(paperId); else next.add(paperId);
+      return next;
+    });
+  };
 
   const runHarvest = useCallback(async () => {
     setHarvesting(true);
@@ -128,67 +137,78 @@ export default function LinkedPapers({ planetId }: Props) {
 
       {!loading && !error && papers.length > 0 && (
         <div className="custom-scrollbar max-h-[460px] space-y-3 overflow-y-auto pr-1">
-          {papers.map((paper, i) => (
-            <motion.div
-              key={paper.id}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: Math.min(i * 0.06, 0.5), ease: [0.16, 1, 0.3, 1] }}
-              className="group block rounded-xl border border-white/[0.07] bg-[#0d1322]/50 p-4 transition-all hover:border-[#88C0D0]/40 hover:bg-[#0d1322]/75"
-            >
-              <div className="flex items-start gap-3">
-                <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[#7a869c] transition-colors group-hover:text-[#88C0D0]" />
-                <div className="min-w-0 space-y-1.5 w-full">
-                  <h4 className="line-clamp-2 text-xs font-semibold leading-snug text-[#ECEFF4] transition-colors group-hover:text-white">
-                    {paper.title}
-                  </h4>
-                  <div className="flex flex-wrap items-center gap-3 text-[10px] text-[#7a869c]">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(paper.publishedDate).toLocaleDateString()}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <User className="h-3 w-3" />
-                      {t("papers.authors", { count: paper.authorIds.length })}
-                    </span>
-                    {paper.isReviewed && (
-                      <span className="rounded border border-[#81A1C1]/25 bg-[#81A1C1]/10 px-1.5 py-0.5 text-[8px] font-medium uppercase text-[#81A1C1]">
-                        {t("papers.reviewed")}
+          {papers.map((paper, i) => {
+            const isExpanded = expandedPapers.has(paper.id);
+            return (
+              <motion.div
+                key={paper.id}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: Math.min(i * 0.06, 0.5), ease: [0.16, 1, 0.3, 1] }}
+                className="group block rounded-xl border border-white/[0.07] bg-[#0d1322]/50 p-4 transition-all hover:border-[#88C0D0]/40 hover:bg-[#0d1322]/75 cursor-pointer"
+                onClick={() => togglePaper(paper.id)}
+              >
+                <div className="flex items-start gap-3">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-[#7a869c] transition-colors group-hover:text-[#88C0D0]" />
+                  <div className="min-w-0 space-y-1.5 w-full">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className={`text-xs font-semibold leading-snug text-[#ECEFF4] transition-colors group-hover:text-white ${isExpanded ? "" : "line-clamp-2"}`}>
+                        {paper.title}
+                      </h4>
+                      <span className="text-[10px] text-[#88C0D0]/70 shrink-0 font-medium select-none hover:text-[#88C0D0]">
+                        {isExpanded ? t("synthesis.collapse") : t("synthesis.expand")}
                       </span>
-                    )}
-                  </div>
-                  <div className="line-clamp-3 text-[11px] leading-relaxed text-[#9aa7bd] font-medium">
-                    <MarkdownText text={paper.abstract} />
-                  </div>
-                  <div className="mt-2 flex items-center justify-between opacity-0 transition-opacity group-hover:opacity-100">
-                    <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[#88C0D0]">
-                      arXiv:{extractArxivId(paper.id)}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={arxivUrl(paper.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded p-1.5 text-[#7a869c] hover:bg-white/10 hover:text-[#ECEFF4] transition-colors"
-                        title="Read HTML"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                      <a
-                        href={`https://arxiv.org/pdf/${paper.id.replace('papers/', '')}.pdf`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded p-1.5 text-[#7a869c] hover:bg-[#BF616A]/20 hover:text-[#BF616A] transition-colors"
-                        title="Download PDF"
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                      </a>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] text-[#7a869c]">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {new Date(paper.publishedDate).toLocaleDateString()}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        {t("papers.authors", { count: paper.authorIds.length })}
+                      </span>
+                      {paper.isReviewed && (
+                        <span className="rounded border border-[#81A1C1]/25 bg-[#81A1C1]/10 px-1.5 py-0.5 text-[8px] font-medium uppercase text-[#81A1C1]">
+                          {t("papers.reviewed")}
+                        </span>
+                      )}
+                    </div>
+                    <div className={`text-[11px] leading-relaxed text-[#9aa7bd] font-medium ${isExpanded ? "" : "line-clamp-3"}`}>
+                      <MarkdownText text={paper.abstract} />
+                    </div>
+                    <div className="mt-2 flex items-center justify-between opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="inline-flex items-center gap-1 font-mono text-[10px] text-[#88C0D0]">
+                        arXiv:{extractArxivId(paper.id)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={arxivUrl(paper.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded p-1.5 text-[#7a869c] hover:bg-white/10 hover:text-[#ECEFF4] transition-colors"
+                          title="Read HTML"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                        <a
+                          href={`https://arxiv.org/pdf/${paper.id.replace('papers/', '')}.pdf`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded p-1.5 text-[#7a869c] hover:bg-[#BF616A]/20 hover:text-[#BF616A] transition-colors"
+                          title="Download PDF"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          ))}
+              </motion.div>
+            );
+          })}
         </div>
       )}
     </div>

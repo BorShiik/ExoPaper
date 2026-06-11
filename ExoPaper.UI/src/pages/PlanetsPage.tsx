@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import {
@@ -19,6 +19,7 @@ import { getExoplanets } from "../api/exoplanets";
 import type { Exoplanet } from "../types";
 import { shortId, methodLabel, formatValue } from "../lib/utils";
 import { useT } from "../i18n/LanguageContext";
+import { useAppStore } from "../stores/appStore";
 
 const PAGE = 24;
 
@@ -27,7 +28,7 @@ const METHODS = [
   { value: "Transit", key: "method.transit" as const },
   { value: "Radial Velocity", key: "method.radialVelocity" as const },
   { value: "Microlensing", key: "method.microlensing" as const },
-  { value: "Direct Imaging", key: "method.directImaging" as const },
+  { value: "Imaging", key: "method.directImaging" as const },
   { value: "Transit Timing Variations", key: "method.ttv" as const },
 ];
 
@@ -235,12 +236,17 @@ export default function PlanetsPage() {
   const t = useT();
   const navigate = useNavigate();
 
-  const [planets, setPlanets] = useState<Exoplanet[]>([]);
+  const {
+    planetsList: planets,
+    planetsMethod: method,
+    planetsNameFilter: nameFilter,
+    planetsSkip: skip,
+    planetsScrollY,
+    setPlanetsCatalogState,
+  } = useAppStore();
+
   const [loading, setLoading] = useState(false);
-  const [skip, setSkip] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [method, setMethod] = useState("");
-  const [nameFilter, setNameFilter] = useState("");
+  const [hasMore, setHasMore] = useState(planets.length === 0 || planets.length % PAGE === 0);
 
   const fetchPage = async (currentSkip: number, append: boolean, discoveryMethod: string) => {
     setLoading(true);
@@ -251,7 +257,11 @@ export default function PlanetsPage() {
         take: PAGE,
         sortBy: "orbitalPeriod",
       });
-      setPlanets((prev) => (append ? [...prev, ...data] : data));
+      const nextPlanets = append ? [...useAppStore.getState().planetsList, ...data] : data;
+      setPlanetsCatalogState({
+        planetsList: nextPlanets,
+        planetsSkip: currentSkip,
+      });
       setHasMore(data.length === PAGE);
     } catch (e) {
       console.error(e);
@@ -260,15 +270,37 @@ export default function PlanetsPage() {
     }
   };
 
+  const isInitial = useRef(true);
+
   useEffect(() => {
-    setSkip(0);
+    if (isInitial.current) {
+      isInitial.current = false;
+      if (planets.length > 0) {
+        // Restore scroll position
+        if (planetsScrollY > 0) {
+          const timeoutId = setTimeout(() => {
+            window.scrollTo({ top: planetsScrollY, behavior: "instant" as ScrollBehavior });
+          }, 80);
+          return () => clearTimeout(timeoutId);
+        }
+        return;
+      }
+    }
+
+    setPlanetsCatalogState({ planetsList: [], planetsSkip: 0 });
     fetchPage(0, false, method);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [method]);
 
+  // Save scroll position on unmount
+  useEffect(() => {
+    return () => {
+      setPlanetsCatalogState({ planetsScrollY: window.scrollY });
+    };
+  }, [setPlanetsCatalogState]);
+
   const loadMore = () => {
     const next = skip + PAGE;
-    setSkip(next);
     fetchPage(next, true, method);
   };
 
@@ -317,7 +349,7 @@ export default function PlanetsPage() {
             <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7a869c]" />
             <input
               value={nameFilter}
-              onChange={(e) => setNameFilter(e.target.value)}
+              onChange={(e) => setPlanetsCatalogState({ planetsNameFilter: e.target.value })}
               placeholder={t("planets.namePlaceholder")}
               className="w-full rounded-xl border border-white/10 bg-[#070b14]/70 py-2.5 pl-11 pr-4 text-sm text-[#ECEFF4] placeholder:text-[#5b6678] transition-all focus:border-[#88C0D0]/50 focus:outline-none focus:ring-2 focus:ring-[#88C0D0]/20"
             />
@@ -329,7 +361,7 @@ export default function PlanetsPage() {
               return (
                 <button
                   key={m.value || "any"}
-                  onClick={() => setMethod(m.value)}
+                  onClick={() => setPlanetsCatalogState({ planetsMethod: m.value })}
                   className={`relative rounded-full px-3.5 py-1.5 text-[11px] font-medium transition-colors ${
                     active ? "text-[#05070f]" : "text-[#9aa7bd] hover:text-[#ECEFF4]"
                   }`}

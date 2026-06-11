@@ -33,10 +33,23 @@ public class OllamaClient : IOllamaClient
 
     private string KeepAlive => $"{_settings.KeepAliveMinutes}m";
 
-    private Dictionary<string, object>? GenerationOptions =>
-        _settings.MaxGenerationTokens > 0
-            ? new Dictionary<string, object> { ["num_predict"] = _settings.MaxGenerationTokens }
-            : null;
+    private Dictionary<string, object> GenerationOptions
+    {
+        get
+        {
+            var opts = new Dictionary<string, object>
+            {
+                // Context window large enough to hold the prompt (params + literature + schema)
+                // AND the generated profile. Ollama's small default (2048) silently truncates the
+                // prompt from the START, dropping the system instruction — which made the model
+                // ramble about the papers instead of returning the JSON profile.
+                ["num_ctx"] = _settings.ContextWindowTokens,
+            };
+            if (_settings.MaxGenerationTokens > 0)
+                opts["num_predict"] = _settings.MaxGenerationTokens;
+            return opts;
+        }
+    }
 
     /// <inheritdoc />
     public async Task<float[]> GetEmbeddingAsync(string text, CancellationToken ct = default)

@@ -10,8 +10,14 @@ const METHOD_KEYS: Record<string, TranslationKey> = {
   Transit: "method.transit",
   "Radial Velocity": "method.radialVelocity",
   Microlensing: "method.microlensing",
-  "Direct Imaging": "method.directImaging",
+  Imaging: "method.directImaging",
   "Transit Timing Variations": "method.ttv",
+  "Eclipse Timing Variations": "method.eclipseTiming",
+  "Orbital Brightness Modulation": "method.orbitalBrightness",
+  "Pulsar Timing": "method.pulsarTiming",
+  Astrometry: "method.astrometry",
+  "Pulsation Timing Variations": "method.pulsationTiming",
+  "Disk Kinematics": "method.diskKinematics",
 };
 
 export function methodLabel(

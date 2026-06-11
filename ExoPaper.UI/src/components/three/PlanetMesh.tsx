@@ -93,7 +93,7 @@ export default function PlanetMesh({
     () =>
       gaseous
         ? null
-        : generatePlanetTexturesGPU(gl, seed, false, graphicsQuality === "high" ? 2048 : 512, effectiveTempK, isLava),
+        : generatePlanetTexturesGPU(gl, seed, false, graphicsQuality === "high" ? 1024 : 512, effectiveTempK, isLava),
     [gl, seed, gaseous, graphicsQuality, effectiveTempK, isLava]
   );
 

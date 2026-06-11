@@ -142,44 +142,43 @@ export default function PlanetDetailPage() {
           {/* ───────── RIGHT 40% · telemetry HUD ───────── */}
           <div className="flex w-full flex-col border-l border-white/5 bg-gradient-to-b from-[#0a0e1a]/70 to-[#05070f]/40 pt-6 backdrop-blur-sm lg:h-screen lg:w-2/5 lg:pt-24">
             
-            {/* AI Summary Panel */}
-            <div className="px-5">
+            {/* Single scroll area: AI profile (can be tall), sticky tabs, then tab content. */}
+            <div className="custom-scrollbar flex-1 overflow-y-auto px-5 pb-10">
+              {/* AI Summary Panel */}
               <PlanetSummaryPanel planetId={planet.id} autoLoad={planet.hasCachedAiSummary ?? false} />
-            </div>
 
-            {/* Tabs */}
-            <div className="shrink-0 px-5">
-              <div className="flex gap-1 rounded-xl border border-white/10 bg-[#0d1322]/60 p-1">
-                {TABS.map((tb) => {
-                  const active = tab === tb.key;
-                  const Icon = tb.icon;
-                  return (
-                    <button
-                      key={tb.key}
-                      onClick={() => setTab(tb.key)}
-                      className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                        active ? "text-[#05070f]" : "text-[#9aa7bd] hover:text-[#ECEFF4]"
-                      }`}
-                    >
-                      {active && (
-                        <motion.span
-                          layoutId="detail-tab-pill"
-                          className="absolute inset-0 rounded-lg bg-[#88C0D0]"
-                          transition={{ type: "spring", stiffness: 480, damping: 36 }}
-                        />
-                      )}
-                      <span className="relative flex items-center gap-1.5">
-                        <Icon className="h-3.5 w-3.5" />
-                        {tb.label}
-                      </span>
-                    </button>
-                  );
-                })}
+              {/* Tabs — sticky so they stay reachable while scrolling a long profile */}
+              <div className="sticky top-0 z-20 -mx-5 mb-4 bg-gradient-to-b from-[#05070f] via-[#05070f]/90 to-transparent px-5 pb-3 pt-1">
+                <div className="flex gap-1 rounded-xl border border-white/10 bg-[#0d1322]/80 p-1 backdrop-blur-sm">
+                  {TABS.map((tb) => {
+                    const active = tab === tb.key;
+                    const Icon = tb.icon;
+                    return (
+                      <button
+                        key={tb.key}
+                        onClick={() => setTab(tb.key)}
+                        className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                          active ? "text-[#05070f]" : "text-[#9aa7bd] hover:text-[#ECEFF4]"
+                        }`}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="detail-tab-pill"
+                            className="absolute inset-0 rounded-lg bg-[#88C0D0]"
+                            transition={{ type: "spring", stiffness: 480, damping: 36 }}
+                          />
+                        )}
+                        <span className="relative flex items-center gap-1.5">
+                          <Icon className="h-3.5 w-3.5" />
+                          {tb.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
 
-            {/* Tab content */}
-            <div className="custom-scrollbar flex-1 overflow-y-auto px-5 pb-10 pt-4">
+              {/* Tab content */}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={tab}

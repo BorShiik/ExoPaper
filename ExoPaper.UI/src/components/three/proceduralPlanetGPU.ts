@@ -310,7 +310,9 @@ interface CacheEntry {
   lastUsed: number;
 }
 const _cache = new Map<string, CacheEntry>();
-const CACHE_CAPACITY = 10;
+// Each cached planet holds 3–4 full render targets; keep the pool small so we don't
+// exhaust GPU memory (which causes WebGL "context lost" on modest GPUs).
+const CACHE_CAPACITY = 4;
 let _clock = 0;
 
 function evictIfNeeded() {

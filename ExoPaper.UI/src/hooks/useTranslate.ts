@@ -55,10 +55,17 @@ export function useTranslate(
         q: text,
         source: sourceLocale,
         target: locale,
+        format: "text",
       }),
       signal: controller.signal,
     })
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) {
+          const body = await r.text().catch(() => "");
+          throw new Error(`translate ${r.status}: ${body.slice(0, 200)}`);
+        }
+        return r.json();
+      })
       .then((data) => {
         const result = data.translatedText ?? text;
         cache.set(key, result);
@@ -134,10 +141,10 @@ export function useTranslateBatch(
         fetch(TRANSLATE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ q: text, source: sourceLocale, target: locale }),
+          body: JSON.stringify({ q: text, source: sourceLocale, target: locale, format: "text" }),
           signal: controller.signal,
         })
-          .then((r) => r.json())
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
           .then((d) => d.translatedText ?? text)
           .catch(() => text)
       )

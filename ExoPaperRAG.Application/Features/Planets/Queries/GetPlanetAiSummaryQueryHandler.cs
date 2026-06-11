@@ -63,7 +63,7 @@ public class GetPlanetAiSummaryQueryHandler
         var docId = RavenIds.EnsurePrefix(request.ExoplanetId, "exoplanets/");
         var papers = await session.Query<Paper>()
             .Where(p => p.ExoplanetIds.Contains(docId))
-            .Take(20)
+            .Take(6)
             .ToListAsync(ct);
 
         if (papers.Count == 0)
@@ -97,7 +97,7 @@ public class GetPlanetAiSummaryQueryHandler
             var contextBlock = string.Join("\n\n---\n\n", papers.Select((p, i) =>
                 $"Paper {i + 1}: \"{p.Title}\"\n" +
                 $"Published: {p.PublishedDate:yyyy-MM-dd}\n" +
-                $"Abstract: {Truncate(p.Abstract, 800)}"));
+                $"Abstract: {Truncate(p.Abstract, 450)}"));
 
             systemPrompt =
                 "You are an expert astrophysics research assistant. Your task is to create a comprehensive, " +
@@ -118,7 +118,9 @@ public class GetPlanetAiSummaryQueryHandler
                 "- For reference: Earth mass = 1 M⊕, Jupiter mass = 317.8 M⊕, Earth radius = 1 R⊕, Jupiter radius = 11.2 R⊕.";
 
             userPrompt =
-                $"=== CATALOG PARAMETERS ===\n{planetContext}\n\n=== SCIENTIFIC LITERATURE ===\n{contextBlock}";
+                $"=== CATALOG PARAMETERS ===\n{planetContext}\n\n=== SCIENTIFIC LITERATURE ===\n{contextBlock}\n\n" +
+                $"=== TASK ===\nUsing the data above, output ONLY the JSON planet profile for {planet.Name} " +
+                "exactly matching the schema. Describe the PLANET, not the papers. No markdown fences, no extra text.";
         }
         else
         {
@@ -139,17 +141,27 @@ public class GetPlanetAiSummaryQueryHandler
                 "- literature_synthesis: set to empty string (no papers available).\n" +
                 "- For reference: Earth mass = 1 M⊕, Jupiter mass = 317.8 M⊕, Earth radius = 1 R⊕, Jupiter radius = 11.2 R⊕.";
 
-            userPrompt = $"=== CATALOG PARAMETERS ===\n{planetContext}";
+            userPrompt = $"=== CATALOG PARAMETERS ===\n{planetContext}\n\n" +
+                $"=== TASK ===\nOutput ONLY the JSON planet profile for {planet.Name} exactly matching the " +
+                "schema. No markdown fences, no extra text.";
         }
 
         PlanetAiSummaryResult result;
         try
         {
             var rawResponse = await _ollama.GenerateAsync(userPrompt, systemPrompt, ct);
-            result = ParseStructuredSummary(rawResponse, request.ExoplanetId, planet.Name);
+            var parsed = ParseStructuredSummary(rawResponse, request.ExoplanetId, planet.Name);
 
-            if (string.IsNullOrWhiteSpace(result.ShortSummary) && string.IsNullOrWhiteSpace(result.KeyHighlights))
-                throw new InvalidOperationException("Empty summary from model.");
+            // Model returned prose instead of JSON (or empty) → use the deterministic,
+            // structured parameter profile rather than caching a garbage ramble.
+            if (parsed is null ||
+                (string.IsNullOrWhiteSpace(parsed.ShortSummary) && string.IsNullOrWhiteSpace(parsed.KeyHighlights)))
+            {
+                _logger.LogWarning("AI synthesis for '{Planet}' returned no valid JSON; using parameter fallback.", planet.Name);
+                return fallbackResult;
+            }
+
+            result = parsed;
 
             // Cache the genuine model output.
             planet.CachedAiGeneralSummary = JsonSerializer.Serialize(result);
@@ -185,7 +197,7 @@ public class GetPlanetAiSummaryQueryHandler
         """;
 
     // ── Parse structured JSON ───────────────────────────────────────────────
-    private static PlanetAiSummaryResult ParseStructuredSummary(string raw, string exoplanetId, string? name)
+    private static PlanetAiSummaryResult? ParseStructuredSummary(string raw, string exoplanetId, string? name)
     {
         try
         {
@@ -226,14 +238,9 @@ public class GetPlanetAiSummaryQueryHandler
         }
         catch
         {
-            // Model returned prose instead of JSON — use it as the detailed body.
-            return new PlanetAiSummaryResult
-            {
-                ExoplanetId = exoplanetId,
-                ExoplanetName = name,
-                ShortSummary = raw.Length > 200 ? raw[..200] + "..." : raw,
-                DetailedSummary = raw.Trim()
-            };
+            // Model returned prose instead of valid JSON — signal failure so the caller
+            // can fall back to the deterministic, structured parameter profile.
+            return null;
         }
     }
 

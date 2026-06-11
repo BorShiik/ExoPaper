@@ -131,7 +131,7 @@ export default function HybridSearchBar({ onSearch, isSearchingGlobal }: Props) 
                 <option value="Transit">{t("method.transit")}</option>
                 <option value="Radial Velocity">{t("method.radialVelocity")}</option>
                 <option value="Microlensing">{t("method.microlensing")}</option>
-                <option value="Direct Imaging">{t("method.directImaging")}</option>
+                <option value="Imaging">{t("method.directImaging")}</option>
                 <option value="Transit Timing Variations">{t("method.ttv")}</option>
               </select>
             </div>

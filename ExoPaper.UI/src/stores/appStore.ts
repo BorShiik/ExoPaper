@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { HubConnection } from "@microsoft/signalr";
-import type { RealtimeEvent } from "../types";
+import type { Exoplanet, RealtimeEvent } from "../types";
 
 export type GraphicsQuality = "high" | "low";
 
@@ -38,6 +38,21 @@ interface AppState {
   // Graphics settings
   graphicsQuality: GraphicsQuality;
   setGraphicsQuality: (quality: GraphicsQuality) => void;
+
+  // Exoplanet catalog page cache
+  planetsList: Exoplanet[];
+  planetsMethod: string;
+  planetsNameFilter: string;
+  planetsSkip: number;
+  planetsScrollY: number;
+  setPlanetsCatalogState: (state: Partial<{
+    planetsList: Exoplanet[];
+    planetsMethod: string;
+    planetsNameFilter: string;
+    planetsSkip: number;
+    planetsScrollY: number;
+  }>) => void;
+  resetPlanetsCatalogState: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -62,4 +77,18 @@ export const useAppStore = create<AppState>((set) => ({
 
   graphicsQuality: detectInitialQuality(),
   setGraphicsQuality: (q) => set({ graphicsQuality: q }),
+
+  planetsList: [],
+  planetsMethod: "",
+  planetsNameFilter: "",
+  planetsSkip: 0,
+  planetsScrollY: 0,
+  setPlanetsCatalogState: (state) => set((prev) => ({ ...prev, ...state })),
+  resetPlanetsCatalogState: () => set({
+    planetsList: [],
+    planetsMethod: "",
+    planetsNameFilter: "",
+    planetsSkip: 0,
+    planetsScrollY: 0,
+  }),
 }));

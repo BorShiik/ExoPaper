@@ -1,121 +1,418 @@
-# ExoPaper RAG 🌌
+# ExoPaper — Exoplanet Observatory & Research Platform
 
-**ExoPaper RAG** — это интеллектуальная аналитическая платформа для исследования экзопланет и связанных с ними научных публикаций. Система объединяет реляционные данные NASA Exoplanet Archive с возможностями локальных языковых моделей (LLM) через гибридный векторный поиск (Retrieval-Augmented Generation) на базе СУБД RavenDB. Она выявляет противоречия и неопределенности в научных статьях, а также визуализирует звездные системы в интерактивном 3D-интерфейсе.
+ExoPaper is a full-stack scientific platform for exploring confirmed exoplanets and the
+literature about them. It continuously ingests the **NASA Exoplanet Archive** and **arXiv**,
+vectorizes paper text for **Retrieval-Augmented Generation (RAG)**, generates structured
+AI "planet profiles" with a **local LLM (Ollama)**, tracks measurement uncertainty across
+publications, and renders every planet as a **physically-driven, procedurally-generated 3D
+world** in the browser.
+
+The application is bilingual (English / Polish) with on-the-fly translation, real-time
+updates over SignalR, and a cinematic React Three Fiber front end.
+
+<!-- Replace with a real banner / hero screenshot (recommended: 1600×800) -->
+![ExoPaper — planet detail with 3D model and AI profile](docs/screenshots/hero.png)
+
+> _Screenshots are placeholders — drop your own PNGs into `docs/screenshots/` using the
+> file names below._
 
 ---
 
-## 🛠 Технологический стек
+## Table of Contents
 
-- **Бэкенд:** .NET 9, ASP.NET Core, MediatR (CQRS), Polly (устойчивость к сбоям), Quartz.NET (расписание задач).
-- **База данных:** RavenDB 7.0 (кластер из 3 нод, MapReduce индексы, векторный поиск Corax, Transactional Outbox).
-- **AI/LLM:** Ollama (локальные модели `nomic-embed-text` для эмбеддингов и `llama3:8b` для генерации ответов RAG).
-- **Фронтенд:** React 19, TypeScript, Vite, Tailwind CSS v4, Zustand.
-- **Интерактивный 3D холст:** Three.js, React Three Fiber (R3F), Drei.
-- **Real-time транспорт:** SignalR (WebSockets) с автоматическим переподключением.
-- **Оркестрация и проксирование:** Docker Compose, Nginx.
+1. [Key Features](#key-features)
+2. [Screenshots](#screenshots)
+3. [Architecture](#architecture)
+3. [Technology Stack](#technology-stack)
+4. [Data Sources & Pipeline](#data-sources--pipeline)
+5. [Domain Model](#domain-model)
+6. [Backend Subsystems](#backend-subsystems)
+7. [3D Rendering Engine](#3d-rendering-engine)
+8. [Frontend Architecture](#frontend-architecture)
+9. [API Surface](#api-surface)
+10. [Project Structure](#project-structure)
+11. [Running the Project](#running-the-project)
+12. [Configuration](#configuration)
+13. [Performance & Optimization](#performance--optimization)
 
 ---
 
-## 📂 Структура репозитория
+## Key Features
+
+- **Automated catalog ingestion** — Daily sync of ~6,300 confirmed planets from the NASA
+  Exoplanet Archive (TAP/ADQL), with ~40 scientific parameters per planet and cross-fill
+  from the per-publication `ps` table when the composite table is sparse.
+- **Literature harvesting** — Bulk arXiv OAI-PMH harvesting (filtered to `astro-ph.EP`) plus
+  **on-demand, per-planet targeted search** by name and aliases for sparsely-studied worlds.
+- **RAG over papers** — Full paper text is fetched, chunked, embedded (`nomic-embed-text`),
+  stored as standalone chunk documents, and indexed for **Corax vector search** in RavenDB.
+- **AI Planet Profile** — A local LLM generates a structured, 10-section profile (highlights,
+  habitability, comparative context, atmosphere, orbital dynamics, host star, literature,
+  open questions) grounded in catalog parameters + literature, with a deterministic
+  parameter-only fallback so the panel never fails.
+- **Uncertainty / discrepancy tracking** — Pulls every published measurement (with error
+  bars) of a planet's parameters from NASA's `ps` table and computes per-parameter spread,
+  flagging genuine cross-publication disagreements — fully data-driven (no LLM dependency).
+- **Conversational RAG** — Ask questions about a planet; vector search is scoped to that
+  planet's linked papers, then the LLM streams a grounded, cited answer over SignalR.
+- **Procedural 3D worlds** — Each planet is rendered with GPU-generated PBR textures whose
+  appearance is **driven by the planet's real physics** (temperature → lava / temperate /
+  ice palettes), with volumetric atmospheres, gas-giant bands, Saturn-style rings, and star
+  shaders.
+- **Bilingual UI** — English/Polish interface with automatic background translation of
+  AI-generated text via a local LibreTranslate container.
+- **Real-time telemetry** — SignalR pushes embedding/tagging events to a live dashboard using
+  the transactional outbox pattern.
+
+---
+
+## Screenshots
+
+> Placeholders — add your images to `docs/screenshots/` with these file names.
+
+### Dashboard
+Live metrics, discovery-method analytics and the pipeline-coverage widget over an animated
+cosmic background.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Planet Detail — 3D Model
+Procedurally generated, physics-driven planet with atmosphere, rings and a shader-based star.
+
+![Planet detail 3D](docs/screenshots/planet-3d.png)
+
+### AI Planet Profile
+Structured, multi-section AI profile (auto-translated to Polish) generated from catalog data
+and literature.
+
+![AI Planet Profile](docs/screenshots/ai-profile.png)
+
+### Parameters
+Spec sheet with hero metrics, human-relatable conversions and grouped scientific parameters.
+
+![Parameters panel](docs/screenshots/parameters.png)
+
+### Uncertainty Tracking
+Data-driven cross-publication discrepancy analysis from NASA `ps` measurements.
+
+![Uncertainty tracking](docs/screenshots/uncertainty.png)
+
+### Linked Publications & RAG Search
+Linked papers with on-demand arXiv search and conversational, citation-grounded RAG answers.
+
+![Linked publications](docs/screenshots/publications.png)
+
+| | |
+|---|---|
+| ![Catalog](docs/screenshots/catalog.png) | ![RAG search](docs/screenshots/rag-search.png) |
+| _Exoplanet catalog with filters_ | _Streamed RAG answer with sources_ |
+
+---
+
+## Architecture
+
+### High-level system
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Browser (React 19 + React Three Fiber)                                   │
+│   • 3D canvas (z-0)  ↔  Zustand store  ↔  Glassmorphic DOM overlay (z-10) │
+│   • SignalR client  •  i18n (en/pl)  •  LibreTranslate auto-translate     │
+└───────────────┬───────────────────────────────────────────┬──────────────┘
+                │ HTTP /api  ·  WebSocket /hubs               │ /api/translate
+                ▼                                             ▼
+┌──────────────────────────────────────┐        ┌──────────────────────────┐
+│  nginx (reverse proxy)               │        │  LibreTranslate (en↔pl)  │
+└───────────────┬──────────────────────┘        └──────────────────────────┘
+                ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  ASP.NET Core 9 API  ·  Clean Architecture (CQRS via MediatR)             │
+│   Api → Application → Infrastructure → Domain                              │
+│   • Controllers (thin)        • Hosted workers (subscriptions)            │
+│   • SignalR Hub               • Quartz.NET scheduled jobs                 │
+└───────┬───────────────────────────┬──────────────────────────┬───────────┘
+        ▼                           ▼                          ▼
+┌────────────────┐        ┌──────────────────┐       ┌────────────────────┐
+│ RavenDB cluster│        │ Ollama (LLM)     │       │ NASA TAP / arXiv   │
+│ (Corax vectors)│        │ llama3.2:3b +    │       │ (external sources) │
+│ 3 nodes        │        │ nomic-embed-text │       │                    │
+└────────────────┘        └──────────────────┘       └────────────────────┘
+```
+
+### Backend — Clean Architecture (CQRS)
+
+| Layer | Responsibility | Examples |
+|-------|----------------|----------|
+| **Domain** | Pure business entities & rules, no dependencies | `Exoplanet`, `Paper`, `PaperChunk`, `ParameterMeasurement`, unit derivation, HWO-candidate rule |
+| **Application** | Use-cases (MediatR queries/commands), abstractions | `GetPlanetAiSummaryQuery`, `AskExoplanetQuery`, `GetUncertaintySummaryQuery`, `IOllamaClient`, `IExoplanetMeasurementSource` |
+| **Infrastructure** | External integrations & implementations | RavenDB, `NasaClient`, `ArxivClient`, `OllamaClient`, Quartz jobs, hosted workers, indexes |
+| **Api** | HTTP/SignalR transport, DI composition | Controllers, `ExoPaperHub`, `Program.cs` |
+
+The **canvas boundary is never crossed by props** on the front end: DOM React and Canvas
+React communicate only through the Zustand store (`getState()` inside the render loop,
+selectors in the DOM).
+
+---
+
+## Technology Stack
+
+### Backend
+- **.NET 9 / ASP.NET Core** — Web API + SignalR
+- **RavenDB 7.2** (3-node cluster) — document database with the **Corax** search engine for
+  native **vector (HNSW) search**
+- **MediatR** — CQRS request/handler pipeline
+- **Quartz.NET** — scheduled background jobs (NASA sync, arXiv harvest)
+- **Polly** — HTTP resilience (retry, circuit breaker, flow-control handling)
+- **HtmlAgilityPack** — full-text extraction from arXiv HTML
+- **Ollama** — local LLM runtime: `llama3.2:3b` (generation) + `nomic-embed-text` (embeddings)
+
+### Frontend
+- **React 19 + TypeScript + Vite**
+- **React Three Fiber / three.js / @react-three/drei / @react-three/postprocessing** — 3D scene, custom GLSL shaders, bloom/SMAA/tone-mapping
+- **Zustand** — state bridging DOM ↔ WebGL canvas
+- **Tailwind CSS v4** — Nord-palette glassmorphic design system
+- **Framer Motion** — UI animation
+- **@microsoft/signalr** — real-time client
+- **axios** — REST client
+
+### Infrastructure
+- **Docker Compose** — RavenDB cluster, Ollama (GPU-enabled), LibreTranslate, API, UI/nginx
+- **nginx** — serves the SPA and reverse-proxies `/api`, `/hubs`, `/api/translate`
+- **LibreTranslate** — self-hosted en↔pl machine translation
+
+---
+
+## Data Sources & Pipeline
+
+### NASA Exoplanet Archive (TAP / ADQL)
+- **`pscomppars`** (composite parameters) — primary catalog: ~40 columns per planet
+  (mass, radius, orbit, equilibrium temperature, insolation, host-star parameters, discovery
+  metadata, coordinates, magnitudes, aliases, …).
+- **`ps`** (per-publication parameters) — used for **cross-fill** of missing values and for
+  **uncertainty tracking** (each row = one publication, with `err1/err2` error bars).
+- `NasaSyncJob` performs a full seed on first run and **incremental sync** (`releasedate >`
+  last sync) thereafter.
+
+### arXiv
+- **OAI-PMH** (`ListRecords`) — bulk harvesting filtered to the `astro-ph.EP` category, with
+  flow-control (HTTP 503 + `Retry-After`) handling and resumption-token pagination.
+- **Search API** (Atom) — targeted, on-demand per-planet search using the planet's name and
+  aliases, linking results directly to the planet.
+
+### Ingestion → RAG flow
+
+```
+NASA TAP ──► NasaSyncJob ──► Exoplanet docs
+arXiv    ──► Harvester    ──► Paper docs (HasEmbeddings=false)
+                                  │
+                  RavenDB Data Subscription
+                                  ▼
+                         EmbeddingWorker
+              (fetch HTML → chunk → embed via Ollama)
+                                  ▼
+                    PaperChunk docs (separate)  ──►  Papers_ByVector (Corax)
+                                  ▼
+              PaperLinkingWorker (gazetteer entity linking)
+                                  ▼
+                         OutboxEvent ──► SignalR ──► live UI
+```
+
+---
+
+## Domain Model
+
+| Entity | Purpose |
+|--------|---------|
+| `Exoplanet` | ~40 scientific fields, derived values (Earth↔Jupiter units, estimated T_eq), tags, completeness, cached AI summaries |
+| `Paper` | Title, abstract, authors, linked exoplanet ids, `ChunkCount`, embedding state |
+| `PaperChunk` | **Standalone** document (`PaperChunks/{arxivId}/{i}`) holding chunk text + embedding vector — kept out of `Paper` so documents don't exceed RavenDB's 5 MB limit |
+| `Author` | Author entity (Include-friendly relation) |
+| `ParameterMeasurement` / `ParameterDisparity` | Per-publication measurements & computed cross-publication spread |
+| `SyncTracker` | Per-provider sync state (NASA, arXiv) |
+| `OutboxEvent` | Transactional outbox for real-time notifications |
+
+### Indexes
+- **`Papers_ByVector`** — Corax vector index mapping `PaperChunk` documents; uses
+  `LoadDocument<Paper>` so the planet filter stays correct even when a paper is linked after
+  embedding. Stores `PaperId`/`Text`/`ChunkIndex` so retrieval projects results **without
+  loading the large source document**.
+- **`Papers_ByAbstractSearch`** — full-text search over abstracts.
+- **`Exoplanets_ByHabitability`**, **`Exoplanets_StatsByDiscoveryMethod`** — map/reduce
+  analytics for the dashboard.
+
+---
+
+## Backend Subsystems
+
+### Hosted services (run for the app's lifetime)
+- **`RavenInitializer`** — bootstraps the RavenDB cluster out of "passive" state, adds nodes,
+  creates the database with the right replication factor, and deploys all indexes.
+- **`OllamaWarmupService`** — preloads the generation model so the first request is fast.
+- **`EmbeddingWorker`** — consumes a RavenDB Data Subscription of un-embedded papers, fetches
+  full text, chunks it, embeds each chunk, and stores chunk documents.
+- **`PaperLinkingWorker`** — entity-links papers to planets via an `ExoplanetGazetteer`.
+- **`TaggingWorker`** — applies tagging rules (e.g. *HWO Candidate*).
+- **`OutboxDispatcher` / `OutboxCleanupService`** — deliver and prune real-time events.
+
+### Scheduled jobs (Quartz.NET)
+- **`NasaSyncJob`** — daily catalog sync (full seed / incremental).
+- **`ArxivHarvesterJob`** — daily bulk arXiv harvest.
+- **`TargetedHarvesterJob`** — continuous per-planet arXiv backfill.
+
+### AI subsystems
+- **Planet Profile** (`GetPlanetAiSummaryQueryHandler`) — builds a parameter + literature
+  prompt, requests a strict JSON schema, parses it into sections, caches the result, and
+  falls back to a deterministic parameter profile if the model misbehaves.
+- **Uncertainty** (`GetUncertaintySummaryQueryHandler`) — deterministic spread analysis over
+  `ps` measurements.
+- **Ask** (`AskExoplanetQueryHandler`) — planet-scoped vector retrieval + streamed LLM answer.
+
+---
+
+## 3D Rendering Engine
+
+Every planet is generated procedurally — no static assets, fully seeded for determinism.
+
+- **GPU procedural textures** — albedo / normal / roughness (and an emissive *lava* map) are
+  rendered to off-screen targets via custom GLSL, cached in a ref-counted LRU pool.
+- **Physics-driven appearance** — equilibrium temperature (or orbital distance when missing)
+  selects the climate archetype: lava → desert → temperate (oceans) → ice; gas giants are
+  tinted hot-Jupiter / Jovian / ice-giant accordingly.
+- **Atmospheres** — limb-only Rayleigh + Mie scattering shader (wavelength-biased, climate
+  tinted, sunset terminator).
+- **Rings** — procedural banded ring system with Cassini gaps and a cylindrical planet shadow,
+  reserved for true giants.
+- **Stars** — animated granulation/sunspot/corona shaders with temperature-based color and
+  a single shadow-casting light.
+- **Post-processing** — lazy-loaded EffectComposer (Bloom, SMAA, Vignette, ACES tone mapping).
+
+---
+
+## Frontend Architecture
+
+Three coupled layers communicating only through Zustand:
+
+1. **3D scene** (R3F) — `ExoplanetScene`, `CosmicHero`, `PlanetMesh`, `StarMesh`, shaders.
+2. **State & real-time** — Zustand store + SignalR hook (`withAutomaticReconnect`).
+3. **UI overlay** — Nord-palette glassmorphic panels, Framer Motion, Lucide icons.
+
+Notable UI: interactive **Planet Profile accordion** (auto-translated to Polish), **parameter
+spec sheet** with hero tiles and human-relatable conversions, **uncertainty disparity** cards,
+**linked publications** with on-demand arXiv search, and a **pipeline-coverage** dashboard
+widget.
+
+---
+
+## API Surface
+
+| Method & Route | Purpose |
+|----------------|---------|
+| `GET /api/exoplanets` | Paginated, filterable planet list |
+| `GET /api/exoplanets/by-id?id=` | Single planet |
+| `GET /api/exoplanets/habitable` | Habitable-zone planets |
+| `GET /api/exoplanets/stats` | Discovery-method statistics (map/reduce) |
+| `GET /api/exoplanets/hwo-count` | HWO candidate count |
+| `GET /api/exoplanets/summary?id=` | AI planet profile (cached) |
+| `GET /api/exoplanets/uncertainty?id=` | Data-driven discrepancy analysis |
+| `POST /api/exoplanets/harvest?id=` | On-demand targeted arXiv harvest |
+| `GET /api/papers/search` · `by-exoplanet` · `{id}` | Paper search / linkage / detail |
+| `POST /api/papers/search/hybrid` | Hybrid (vector + full-text) search |
+| `GET /api/sync/status` · `health` | Provider sync status / pipeline coverage |
+| `POST /api/sync/nasa` · `arxiv` | Trigger ingestion jobs |
+| `POST /api/translate` | Proxied to LibreTranslate (en↔pl) |
+| `WS /hubs/exopaper` | SignalR — real-time events & streamed RAG answers |
+
+---
+
+## Project Structure
 
 ```
 ExoPaper/
-├── ExoPaper.UI/                 # Фронтенд-приложение на React + TS + Vite
-│   ├── src/
-│   │   ├── api/                 # API клиенты (Axios)
-│   │   ├── components/          # Компоненты UI (разбиты на layout, dashboard, three, planet, search)
-│   │   ├── hooks/               # Кастомные хуки (SignalR)
-│   │   ├── pages/               # Страницы приложения (Dashboard, Detail, Papers)
-│   │   ├── stores/              # Zustand стейт-менеджер
-│   │   └── types/               # TypeScript интерфейсы
-│   └── nginx.conf               # Конфигурация Nginx для продакшена и проксирования
-├── ExoPaperRAG.Api/             # ASP.NET Core Web API (Контроллеры, Hubs, CORS)
-├── ExoPaperRAG.Application/     # Слой бизнес-логики (Commands, Queries, MediatR handlers)
-├── ExoPaperRAG.Domain/          # Доменные сущности и правила тегирования
-├── ExoPaperRAG.Infrastructure/  # Слой инфраструктуры (RavenDB, Ollama, Quartz Jobs, Workers)
-├── docker-compose.yml           # Оркестрация контейнеров
-└── ARCHITECTURE.md              # Подробное описание архитектуры, жизненного цикла данных и алгоритмов
+├── ExoPaperRAG.Domain/          # Entities, rules, derivation (no dependencies)
+├── ExoPaperRAG.Application/     # MediatR use-cases, abstractions, indexes, contracts
+├── ExoPaperRAG.Infrastructure/  # RavenDB, NASA/arXiv/Ollama clients, jobs, workers
+├── ExoPaperRAG.Api/             # Controllers, SignalR hub, DI composition (Program.cs)
+├── ExoPaperRAG.Tests/           # Unit tests (domain rules)
+├── ExoPaper.UI/                 # React + R3F front end (Vite), nginx.conf
+└── docker-compose.yml           # RavenDB cluster, Ollama, LibreTranslate, API, UI
 ```
 
 ---
 
-## 🚀 Быстрый запуск (Docker Compose)
+## Running the Project
 
-Самый быстрый способ поднять всю систему (БД, LLM, API, UI) — запустить Docker Compose.
+### Prerequisites
+- Docker Desktop (allocate **16 GB+ RAM** — the LLM, RavenDB cluster and translator are
+  memory-hungry)
+- Optional: NVIDIA Container Toolkit for GPU-accelerated LLM inference (≈10–50× faster)
 
-### Требования
-- Установленный Docker и Docker Compose.
-- Желательно видеокарта NVIDIA с установленным Nvidia Container Toolkit (для ускорения инференса LLM).
-
-### Команда запуска
-В корневой папке проекта выполните:
+### Start everything
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
-### Что произойдет при первом запуске:
-1. Поднимется кластер **RavenDB** из 3 нод (`ravendb-a`, `ravendb-b`, `ravendb-c`).
-2. Запустится сервер **Ollama**.
-3. Вспомогательный контейнер `ollama-init` дождется готовности Ollama и скачает модели `nomic-embed-text` (для векторного поиска) и `llama3:8b` (для RAG). *Это может занять некоторое время в зависимости от скорости интернета (около 5 ГБ).*
-4. Скомпилируется бэкенд `ExoPaperRAG.Api`, который при запуске автоматически создаст базу данных `ExoPaper` и зарегистрирует все индексы в RavenDB.
-5. Соберется фронтенд `ExoPaper.UI` и запустится под управлением Nginx на порту `3000`.
+On first boot the stack will:
+1. Bootstrap the RavenDB cluster and create the `ExoPaper` database + indexes.
+2. Pull the Ollama models (`llama3.2:3b`, `nomic-embed-text`).
+3. Load the LibreTranslate en/pl models.
 
----
-
-## 🛠 Локальная разработка (Local Development Setup)
-
-Если вы хотите вносить изменения в код бэкенда или фронтенда с быстрой перезагрузкой (Hot Reload), рекомендуется запускать их локально.
-
-### Шаг 1: Запуск базы данных и Ollama
-Вы можете запустить только инфраструктуру через Docker:
+Then trigger the initial data load (UI buttons or):
 ```bash
-docker compose up ravendb-a ravendb-b ravendb-c ollama
+curl -X POST http://localhost:5000/api/sync/nasa     # seed planets
+curl -X POST http://localhost:5000/api/sync/arxiv    # harvest papers
 ```
-*Убедитесь, что модели загружены локально в Ollama:*
+
+| Service | URL |
+|---------|-----|
+| Web UI | http://localhost:3000 |
+| API | http://localhost:5000 |
+| RavenDB Studio | http://localhost:8080 |
+| LibreTranslate | http://localhost:5500 |
+
+### Local development
 ```bash
-ollama pull nomic-embed-text
-ollama pull llama3:8b
+# Backend
+dotnet run --project ExoPaperRAG.Api
+# Frontend (Vite dev server with /api & /hubs proxy)
+cd ExoPaper.UI && npm install && npm run dev
 ```
 
-### Шаг 2: Настройка бэкенда (Web API)
-1. Перейдите в папку `ExoPaperRAG.Api`.
-2. Убедитесь, что в `appsettings.Development.json` прописаны локальные адреса:
-   - RavenDB: `http://localhost:8080`, `http://localhost:8081`, `http://localhost:8082`
-   - Ollama: `http://localhost:11434`
-3. Запустите API:
-   ```bash
-   dotnet run
-   ```
-   API будет доступно по адресу `http://localhost:5000` (или другом порту, указанном в `launchSettings.json`).
+---
 
-### Шаг 3: Настройка фронтенда (React + Vite)
-1. Перейдите в папку `ExoPaper.UI`.
-2. Установите зависимости:
-   ```bash
-   npm install
-   ```
-3. Запустите сервер разработки:
-   ```bash
-   npm run dev
-   ```
-   Фронтенд запустится на `http://localhost:5173`. Запросы к `/api/*` и `/hubs/*` будут автоматически проксироваться на бэкенд (поддерживается CORS для разработки).
+## Configuration
+
+Key settings (`appsettings.json` / environment variables, `__`-delimited):
+
+- `RavenSettings__Urls__*`, `RavenSettings__DatabaseName`
+- `OllamaSettings__GenerationModel` (default `llama3.2:3b`), `EmbeddingModel`,
+  `MaxGenerationTokens`, `ContextWindowTokens`, `GenerationTimeoutMinutes`, `KeepAliveMinutes`
+- `ArxivSettings__SetSpec`, `RelevantCategories`, `FirstRunLookbackDays`,
+  `MaxFlowControlRetries`, `EnableScheduledHarvesting`, `EnableTargetedHarvesting`
+- `NasaApiSettings__BaseUrl`
 
 ---
 
-## 📊 Таблица портов и сервисов
+## Performance & Optimization
 
-| Сервис | Локальный порт | Внутри Docker | Описание |
-| :--- | :--- | :--- | :--- |
-| **ExoPaper UI** | `3000` | `80` | Веб-интерфейс (React + Nginx) |
-| **ExoPaper API** | `5000` | `8080` | ASP.NET Core Web API / SignalR |
-| **RavenDB Node A** | `8080` | `8080` | Первичная нода БД + RavenDB Studio |
-| **RavenDB Node B** | `8081` | `8080` | Вторичная нода БД |
-| **RavenDB Node C** | `8082` | `8080` | Третичная нода БД |
-| **Ollama Server** | `11434` | `11434` | Локальный сервер LLM (Inference) |
+**LLM**
+- `llama3.2:3b` keeps memory low and inference fast on CPU; GPU is the single biggest speedup.
+- Bounded `num_ctx` + trimmed prompts (limited papers/abstract length) prevent context
+  overflow that would otherwise truncate the system instruction.
+- Models are kept warm (`keep_alive`) and warmed up at startup.
+
+**Storage**
+- Embedding chunks live in **separate documents** so `Paper` records stay small (avoiding
+  RavenDB's huge-document warnings and slow writes).
+- The vector index projects stored fields, so retrieval never loads large documents.
+
+**3D**
+- Adaptive DPR + `PerformanceMonitor` auto-scale resolution under load.
+- Render loop pauses when the tab is hidden; quality auto-detected per device.
+- Ref-counted texture cache (bounded) and reduced texture resolution prevent GPU
+  memory exhaustion / WebGL context loss.
+- Post-processing is lazy-loaded to shrink the initial bundle.
 
 ---
 
-## 📂 Дополнительные материалы
-
-- Для глубокого понимания архитектурных слоев, устройства фоновых воркеров (Embedding, Tagging, Outbox) и потока данных ознакомьтесь с [ARCHITECTURE.md](file:///C:/Users/BorShiik/Desktop/prog/CSharp/RavenDB/ExoPaper/ARCHITECTURE.md).
-- Спецификация API-эндпоинтов, структуры индексов RavenDB и SignalR событий описаны в соответствующих подразделах `ARCHITECTURE.md`.
+*ExoPaper combines a production-grade .NET ingestion/RAG backend with a cinematic,
+physically-grounded 3D front end — a research tool that is also a pleasure to explore.*

@@ -143,10 +143,14 @@ function buildSections(p: Exoplanet, heroKeys: Set<string>): SpecSection[] {
     {
       titleKey: "param.section.star",
       rows: rows([
+        { key: "param.hostStar", value: p.hostName ?? "", unit: "" },
         { key: "param.spectralType", value: p.spectralType ?? "", unit: "" },
         { key: "param.stellarTeff", value: p.stellarEffectiveTemperatureK ?? "", unit: "K", decimals: 0 },
         { key: "param.stellarRadius", value: p.stellarRadiusSolar ?? "", unit: "R☉", decimals: 3 },
         { key: "param.stellarMass", value: p.stellarMassSolar ?? "", unit: "M☉", decimals: 3 },
+        { key: "param.stellarLuminosity", value: p.stellarLuminosityLogSolar ?? "", unit: "log L☉", decimals: 3 },
+        { key: "param.stellarLogg", value: p.stellarSurfaceGravity ?? "", unit: "log g", decimals: 2 },
+        { key: "param.stellarMetallicity", value: p.stellarMetallicity ?? "", unit: "[Fe/H]", decimals: 2 },
         { key: "param.stellarAge", value: p.stellarAgeGyr ?? "", unit: "Gyr", decimals: 2 },
       ]),
     },
@@ -154,9 +158,22 @@ function buildSections(p: Exoplanet, heroKeys: Set<string>): SpecSection[] {
       titleKey: "param.section.system",
       rows: rows([
         { key: "param.distance", value: p.distanceParsecs ?? "", unit: "pc", decimals: 2 },
+        { key: "param.numberOfStars", value: p.numberOfStars ?? "", unit: "", decimals: 0 },
         { key: "param.numberOfPlanets", value: p.numberOfPlanets ?? "", unit: "", decimals: 0 },
         { key: "param.discoveryYear", value: p.discoveryYear ?? "", unit: "", decimals: 0 },
         { key: "param.discoveryFacility", value: p.discoveryFacility ?? "", unit: "" },
+        { key: "param.discoveryTelescope", value: p.discoveryTelescope ?? "", unit: "" },
+        { key: "param.discoveryInstrument", value: p.discoveryInstrument ?? "", unit: "" },
+      ]),
+    },
+    {
+      titleKey: "param.section.observation",
+      rows: rows([
+        { key: "param.ra", value: p.rightAscension ?? "", unit: "°", decimals: 4 },
+        { key: "param.dec", value: p.declination ?? "", unit: "°", decimals: 4 },
+        { key: "param.vmag", value: p.vMagnitude ?? "", unit: "mag", decimals: 2 },
+        { key: "param.kmag", value: p.kMagnitude ?? "", unit: "mag", decimals: 2 },
+        { key: "param.gaiamag", value: p.gaiaMagnitude ?? "", unit: "mag", decimals: 2 },
       ]),
     },
   ];

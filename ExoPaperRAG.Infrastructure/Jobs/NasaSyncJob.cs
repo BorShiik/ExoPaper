@@ -102,22 +102,25 @@ public class NasaSyncJob : IJob
     }
 
     /// <summary>
-    /// Fetches only planets that have been updated since the last sync.
+    /// Fetches and reconciles all planets from NASA since the composite parameters table
+    /// lacks individual row update timestamp columns.
     /// </summary>
     private async Task IncrementalSyncAsync(SyncTracker tracker, CancellationToken ct)
     {
-        var since = tracker.LastSyncUtc.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        _logger.LogInformation("[NasaSync] Incremental sync — rows released since {Since}.", since);
+        _logger.LogInformation("[NasaSync] Incremental sync requested. Since the composite parameters table (pscomppars) lacks row update timestamps, running full catalog reconciliation...");
 
-        // Only pull rows whose catalog release date is newer than the last successful sync.
-        var query = BuildSelectQuery()
-            .Where(NasaColumns.UpdateDate, ">", since)
-            .Build();
+        var query = BuildSelectQuery().Build();
 
         var dtos = await _nasaClient.FetchPlanetAcync(query, ct);
 
-        var upserted = dtos.Count > 0 ? await UpsertPlanetsAsync(dtos, ct) : 0;
-        _logger.LogInformation("[NasaSync] Incremental sync upserted {Count} planet(s).", upserted);
+        if (dtos.Count == 0)
+        {
+            _logger.LogInformation("[NasaSync] No records found. Sync complete.");
+            return;
+        }
+
+        var upserted = await UpsertPlanetsAsync(dtos, ct);
+        _logger.LogInformation("[NasaSync] Incremental sync completed. Reconciled {Count} planets.", upserted);
 
         using var session = _store.OpenAsyncSession();
         var freshTracker = await session.LoadAsync<SyncTracker>($"SyncTrackers/{ProviderId}", ct);
