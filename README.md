@@ -68,8 +68,6 @@ updates over SignalR, and a cinematic React Three Fiber front end.
 
 ## Screenshots
 
-> Placeholders — add your images to `docs/screenshots/` with these file names.
-
 ### Dashboard
 Live metrics, discovery-method analytics and the pipeline-coverage widget over an animated
 cosmic background.
