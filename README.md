@@ -13,8 +13,6 @@ updates over SignalR, and a cinematic React Three Fiber front end.
 <!-- Replace with a real banner / hero screenshot (recommended: 1600×800) -->
 ![ExoPaper — planet detail with 3D model and AI profile](docs/screenshots/hero.png)
 
-> _Screenshots are placeholders — drop your own PNGs into `docs/screenshots/` using the
-> file names below._
 
 ---
 
